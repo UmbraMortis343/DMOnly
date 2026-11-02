@@ -226,6 +226,7 @@ public class MainActivity extends Activity {
         String mediaKey;        // the one reel/post you're allowed to be watching
         boolean mediaFromShare; // share links redirect once to the real reel URL
         String lastSeenUrl;
+        String lastPath = "";
         int bounceCount;
         long bounceWindowStart;
 
@@ -332,6 +333,17 @@ public class MainActivity extends Activity {
         Uri uri = Uri.parse(url);
         String scheme = lower(uri.getScheme());
         if (!scheme.equals("https") && !scheme.equals("http")) return;
+
+        // Messenger: leaving a chat back to the inbox -> fresh reload, so the chat list
+        // always shows (Facebook often fails to redraw it at phone width).
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        boolean wasThread = tab.lastPath.matches("^/messages/.*t/.+");
+        tab.lastPath = path;
+        if (tab.kind == Kind.MESSENGER && fbMode() == FB_FIT && isFbHost(lower(uri.getHost()))
+                && wasThread && path.matches("^/messages/?$")) {
+            tab.web.loadUrl(MESSENGER_URL);
+            return;
+        }
 
         Verdict v = evaluate(tab, uri);
         if (v == Verdict.EXTERNAL) {
@@ -567,7 +579,7 @@ public class MainActivity extends Activity {
                 + " fbMiss++;"
                 + " if(fbMiss===2||fbMiss===4)window.dispatchEvent(new Event('resize'));"
                 + " if(fbMiss===8){var t=0;try{t=+sessionStorage.getItem('dmfbReload')||0;}catch(x){}"
-                + "  if(Date.now()-t>15000){try{sessionStorage.setItem('dmfbReload',Date.now());}catch(x){}location.reload();}}"
+                + "  if(Date.now()-t>5000){try{sessionStorage.setItem('dmfbReload',Date.now());}catch(x){}location.reload();}}"
                 + "}"
                 + "var fbMiss=0;"
                 // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
