@@ -7,6 +7,7 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -27,8 +28,12 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -108,6 +113,24 @@ public class MainActivity extends Activity {
     private Tab trayTab;          // Stories tab: the cropped story-circles strip
     private int trayHeightPx;
 
+    // Settings tab + feed break (temporarily unblocks normal Instagram, max 1 hour)
+    private TextView settingsButton;
+    private View settingsView;
+    private long unlockUntil;
+    private boolean wasUnlocked;
+    private Button unlockButton;
+    private TextView unlockStatus;
+    private TextView unlockMinutesLabel;
+    private SeekBar unlockSeek;
+    private final Runnable ticker = new Runnable() {
+        @Override
+        public void run() {
+            if (wasUnlocked && !unlocked()) endUnlock(false);
+            updateUnlockUi();
+            main.postDelayed(this, 1000);
+        }
+    };
+
     // ------------------------------------------------------------------ setup
 
     @Override
@@ -171,13 +194,244 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
 
+        settingsButton = new TextView(this);
+        settingsButton.setText("Settings");
+        settingsButton.setGravity(Gravity.CENTER);
+        settingsButton.setTextSize(15);
+        settingsButton.setOnClickListener(v -> showSettings());
+        bar.addView(settingsButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        settingsView = buildSettingsView();
+        settingsView.setVisibility(View.GONE);
+        content.addView(settingsView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        unlockUntil = prefs.getLong("unlock_until", 0);
+        if (unlocked()) {
+            wasUnlocked = true;
+            feedTab.startUrl = IG_TRAY_URL;
+            feedTab.lastSafeUrl = IG_TRAY_URL;
+        }
+        for (Tab t : tabs) t.button.setVisibility(tabEnabled(t) ? View.VISIBLE : View.GONE);
+
         int last = prefs.getInt("tab", 0);
-        if (last < 0 || last >= tabs.size()) last = 0;
-        select(tabs.get(last));
+        Tab start = (last >= 0 && last < tabs.size()) ? tabs.get(last) : null;
+        if (start == null || !tabEnabled(start)) start = last == -1 ? null : firstEnabledTab();
+        if (start == null) showSettings();
+        else select(start);
+        main.post(ticker);
+    }
+
+    // ------------------------------------------------------------------ settings tab
+
+    private boolean tabEnabled(Tab t) {
+        return prefs.getBoolean("on_" + t.kind.name(), true);
+    }
+
+    private Tab firstEnabledTab() {
+        for (Tab t : tabs) if (tabEnabled(t)) return t;
+        return null;
+    }
+
+    /** Show/hide tab buttons after a setting changes; move off a tab that was just turned off. */
+    private void applyTabVisibility() {
+        for (Tab t : tabs) t.button.setVisibility(tabEnabled(t) ? View.VISIBLE : View.GONE);
+        if (current != null && !tabEnabled(current)) {
+            Tab next = firstEnabledTab();
+            if (next != null) select(next);
+            else showSettings();
+        }
+    }
+
+    private void showSettings() {
+        current = null;
+        for (Tab t : tabs) {
+            t.root.setVisibility(View.GONE);
+            t.button.setTextColor(getColor(R.color.bar_fg));
+            t.button.setTypeface(null, Typeface.NORMAL);
+        }
+        settingsView.setVisibility(View.VISIBLE);
+        settingsButton.setTextColor(getColor(R.color.bar_active));
+        settingsButton.setTypeface(null, Typeface.BOLD);
+        applyOrientation();
+        updateUnlockUi();
+        prefs.edit().putInt("tab", -1).apply();
+    }
+
+    private View buildSettingsView() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(getColor(R.color.bar_bg));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(20), dp(16), dp(20), dp(24));
+        scroll.addView(col);
+
+        TextView title = new TextView(this);
+        title.setText("Settings");
+        title.setTextSize(24);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextColor(getColor(R.color.bar_active));
+        col.addView(title);
+
+        addHeader(col, "Instagram");
+        addTabSwitch(col, "DMs", tabs.get(0));
+        addTabSwitch(col, "Stories & following feed", feedTab);
+
+        addHeader(col, "Messenger");
+        addTabSwitch(col, "Messenger", tabs.get(2));
+        addNote(col, "Long-press the Messenger tab to change how Facebook's site is laid out.");
+
+        addHeader(col, "Feed break");
+        addNote(col, "Opens normal Instagram (feed, Explore, Reels) in the Stories tab for a set time. "
+                + "When the timer runs out, everything is blocked again.");
+        unlockMinutesLabel = new TextView(this);
+        unlockMinutesLabel.setTextSize(16);
+        unlockMinutesLabel.setTextColor(getColor(R.color.bar_active));
+        unlockMinutesLabel.setPadding(0, dp(12), 0, 0);
+        col.addView(unlockMinutesLabel);
+        unlockSeek = new SeekBar(this);
+        unlockSeek.setMax(11);                                       // 5, 10, ... 60 minutes
+        unlockSeek.setProgress(Math.max(0, Math.min(11, prefs.getInt("unlock_minutes", 15) / 5 - 1)));
+        unlockSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                prefs.edit().putInt("unlock_minutes", (p + 1) * 5).apply();
+                updateUnlockUi();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        col.addView(unlockSeek, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        unlockButton = new Button(this);
+        unlockButton.setOnClickListener(v -> {
+            if (unlocked()) endUnlock(true);
+            else startUnlock((unlockSeek.getProgress() + 1) * 5);
+        });
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(8);
+        col.addView(unlockButton, blp);
+        unlockStatus = new TextView(this);
+        unlockStatus.setTextSize(14);
+        unlockStatus.setTextColor(getColor(R.color.bar_fg));
+        unlockStatus.setPadding(0, dp(8), 0, 0);
+        col.addView(unlockStatus);
+        return scroll;
+    }
+
+    private void addHeader(LinearLayout col, String text) {
+        TextView h = new TextView(this);
+        h.setText(text);
+        h.setTextSize(13);
+        h.setAllCaps(true);
+        h.setTypeface(null, Typeface.BOLD);
+        h.setTextColor(getColor(R.color.accent));
+        h.setPadding(0, dp(28), 0, dp(4));
+        col.addView(h);
+    }
+
+    private void addNote(LinearLayout col, String text) {
+        TextView n = new TextView(this);
+        n.setText(text);
+        n.setTextSize(14);
+        n.setTextColor(getColor(R.color.bar_fg));
+        n.setPadding(0, dp(4), 0, 0);
+        col.addView(n);
+    }
+
+    private void addTabSwitch(LinearLayout col, String label, Tab tab) {
+        Switch sw = new Switch(this);
+        sw.setText(label);
+        sw.setTextSize(17);
+        sw.setTextColor(getColor(R.color.bar_active));
+        sw.setPadding(dp(16), dp(12), 0, dp(12));
+        sw.setChecked(tabEnabled(tab));
+        sw.setOnCheckedChangeListener((b, on) -> {
+            prefs.edit().putBoolean("on_" + tab.kind.name(), on).apply();
+            applyTabVisibility();
+        });
+        col.addView(sw, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    // ------------------------------------------------------------------ feed break
+
+    private boolean unlocked() {
+        return System.currentTimeMillis() < unlockUntil;
+    }
+
+    private void startUnlock(int minutes) {
+        minutes = Math.max(1, Math.min(60, minutes));
+        unlockUntil = System.currentTimeMillis() + minutes * 60_000L;
+        prefs.edit().putLong("unlock_until", unlockUntil).apply();
+        wasUnlocked = true;
+        feedTab.startUrl = IG_TRAY_URL;          // normal Instagram home feed
+        feedTab.lastSafeUrl = IG_TRAY_URL;
+        reloadInstagram();
+        updateUnlockUi();
+        if (tabEnabled(feedTab)) select(feedTab);
+    }
+
+    private void endUnlock(boolean early) {
+        unlockUntil = 0;
+        prefs.edit().putLong("unlock_until", 0).apply();
+        wasUnlocked = false;
+        feedTab.startUrl = IG_STORIES_URL;
+        feedTab.lastSafeUrl = IG_STORIES_URL;
+        reloadInstagram();
+        updateUnlockUi();
+        Toast.makeText(this, early ? "Feed break ended." : "Feed break's over. Feeds are blocked again.",
+                Toast.LENGTH_LONG).show();
+    }
+
+    private void reloadInstagram() {
+        for (Tab t : tabs) {
+            if (t.kind != Kind.MESSENGER && t.loaded) {
+                clearMedia(t);
+                t.web.loadUrl(t.startUrl);
+            }
+        }
+        if (trayTab.loaded) loadTray();
+        updateStoriesLayout();
+    }
+
+    private void updateUnlockUi() {
+        boolean on = unlocked();
+        String left = "";
+        if (on) {
+            long s = Math.max(0, (unlockUntil - System.currentTimeMillis()) / 1000);
+            left = String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60);
+        }
+        feedTab.button.setText(on ? "Feed " + left : "Stories");
+        if (unlockButton == null) return;
+        int mins = (unlockSeek.getProgress() + 1) * 5;
+        unlockMinutesLabel.setText("Length: " + mins + " minutes");
+        unlockSeek.setEnabled(!on);
+        unlockButton.setText(on ? "End feed break now" : "Start " + mins + "-minute feed break");
+        unlockStatus.setText(on ? "Feed is open. " + left + " left." : "Feeds are blocked.");
+    }
+
+    // ------------------------------------------------------------------ orientation
+
+    /** Instagram tabs stay portrait (its site shows extra junk in landscape). */
+    private void applyOrientation() {
+        if (customView != null) return;
+        boolean ig = current != null && current.kind != Kind.MESSENGER;
+        setRequestedOrientation(ig ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
 
     private void select(Tab tab) {
         current = tab;
+        settingsView.setVisibility(View.GONE);
+        settingsButton.setTextColor(getColor(R.color.bar_fg));
+        settingsButton.setTypeface(null, Typeface.NORMAL);
         for (Tab t : tabs) {
             boolean on = t == tab;
             t.root.setVisibility(on ? View.VISIBLE : View.GONE);
@@ -190,6 +444,7 @@ public class MainActivity extends Activity {
         }
         if (tab == feedTab && !trayTab.loaded) loadTray();
         updateStoriesLayout();
+        applyOrientation();
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
     }
 
@@ -211,7 +466,7 @@ public class MainActivity extends Activity {
         boolean storyOpen = !tp.isEmpty() && !tp.equals("/");   // a story (or a reply chat) is open
         String fp = feedTab.lastPath;
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) trayTab.web.getLayoutParams();
-        if (!loggedIn) {
+        if (!loggedIn || unlocked()) {        // feed break: plain Instagram, no strip
             trayTab.web.setVisibility(View.GONE);
             feedTab.web.setVisibility(View.VISIBLE);
         } else if (storyOpen) {
@@ -277,7 +532,7 @@ public class MainActivity extends Activity {
     final class Tab {
         final Kind kind;
         final String label;
-        final String startUrl;
+        String startUrl;
         final WebView web;
         final TextView button;
         final boolean isTray;   // the cropped story-circles strip in the Stories tab
@@ -468,6 +723,12 @@ public class MainActivity extends Activity {
         boolean fb = isFbHost(host);
         if (!ig && !fb) return Verdict.EXTERNAL;
 
+        // Feed break: normal Instagram, nothing blocked until the timer runs out.
+        if (ig && unlocked()) return Verdict.ALLOW;
+
+        // Your saved posts / collections (the "Save to collection" picker can open these).
+        if (ig && path.matches("^/[^/]+/saved(/.*)?$")) return Verdict.ALLOW;
+
         // messenger.com just redirects to facebook.com/messages now.
         if (host.equals("messenger.com") || host.endsWith(".messenger.com")) return Verdict.ALLOW;
 
@@ -596,6 +857,7 @@ public class MainActivity extends Activity {
 
     /** Hides feed links/buttons and watches for in-page URL changes. */
     private void injectHelpers(Tab tab) {
+        if (tab.kind != Kind.MESSENGER && unlocked()) return;   // feed break: leave Instagram as-is
         String css;
         switch (tab.kind) {
             case IG_DMS:
@@ -679,18 +941,12 @@ public class MainActivity extends Activity {
                 // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
                 + "function hideBars(){"
                 + " if(!STORIES||TRAY||location.pathname!=='/')return;"
-                + " [innerHeight-8].forEach(function(y){"
-                + "  var els=document.elementsFromPoint(innerWidth/2,y)||[];"
-                + "  for(var i=0;i<els.length;i++){var e=els[i];"
-                + "   while(e&&e!==document.body&&e!==document.documentElement){"
-                + "    var p=getComputedStyle(e).position;"
-                + "    if((p==='fixed'||p==='sticky')&&e.getBoundingClientRect().height<140){e.classList.add('dmonly-hide');break;}"
-                + "    e=e.parentElement;}"
-                + "  }"
-                + " });"
+                // Only the top bar's icons. (Pop-ups like "Save to collection" are left alone;
+                // the bottom tab bar is handled by hideNav.)
                 + " document.querySelectorAll('svg[aria-label]').forEach(function(s){"
+                + "  if(s.closest('[role=dialog]')||s.getBoundingClientRect().top>80)return;"
                 + "  var l=s.getAttribute('aria-label').toLowerCase();"
-                + "  if(/messenger|direct|notification|activity|new post|create|home|search|explore|reels/.test(l)){"
+                + "  if(/messenger|direct|notification|activity|new post|home|search|explore|reels/.test(l)){"
                 + "   var b=s.closest('a,button,[role=button]');if(b)b.classList.add('dmonly-hide');}"
                 + " });"
                 + "}"
@@ -825,6 +1081,7 @@ public class MainActivity extends Activity {
             }
             customView = view;
             customViewCallback = callback;
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);   // full-screen video can rotate
             view.setBackgroundColor(Color.BLACK);
             rootLayout.addView(view, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -848,6 +1105,7 @@ public class MainActivity extends Activity {
         customView = null;
         if (customViewCallback != null) customViewCallback.onCustomViewHidden();
         customViewCallback = null;
+        applyOrientation();
     }
 
     @Override
@@ -900,7 +1158,14 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (wasUnlocked && !unlocked()) endUnlock(false);   // timer ran out while you were away
+    }
+
+    @Override
     protected void onDestroy() {
+        main.removeCallbacks(ticker);
         for (Tab t : tabs) {
             t.web.destroy();
         }
