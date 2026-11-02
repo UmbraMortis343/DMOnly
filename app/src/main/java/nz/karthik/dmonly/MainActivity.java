@@ -62,6 +62,10 @@ public class MainActivity extends Activity {
     private static final String IG_STORIES_URL = "https://www.instagram.com/";
     private static final String MESSENGER_URL = "https://www.facebook.com/messages/";
 
+    private static final int FB_FIT = 0;     // desktop site laid out at phone width (default)
+    private static final int FB_WIDE = 1;    // desktop site at full width, zoomed out
+    private static final int FB_MOBILE = 2;  // Facebook's mobile site
+
     private static final int REQ_FILE = 11;
     private static final int REQ_PERMS = 12;
 
@@ -168,6 +172,11 @@ public class MainActivity extends Activity {
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
     }
 
+    private int fbMode() {
+        int m = prefs.getInt("fb_mode", FB_FIT);
+        return (m < FB_FIT || m > FB_MOBILE) ? FB_FIT : m;
+    }
+
     private void onTabTap(Tab tab) {
         if (tab == current) {
             tab.web.loadUrl(tab.startUrl);   // tap the tab you're on = back to the inbox
@@ -180,8 +189,11 @@ public class MainActivity extends Activity {
         List<String> items = new ArrayList<>();
         items.add("Reload");
         items.add("Back to start");
+        int mode = fbMode();
         if (tab.kind == Kind.MESSENGER) {
-            items.add(tab.desktop() ? "Use mobile site" : "Use desktop site (if mobile won't load)");
+            items.add((mode == FB_FIT ? "✓ " : "") + "Desktop site, fit to screen");
+            items.add((mode == FB_WIDE ? "✓ " : "") + "Desktop site, zoomed out");
+            items.add((mode == FB_MOBILE ? "✓ " : "") + "Mobile site");
         }
         new AlertDialog.Builder(this)
                 .setTitle(tab.label)
@@ -192,7 +204,7 @@ public class MainActivity extends Activity {
                     } else if (which == 1) {
                         tab.web.loadUrl(tab.startUrl);
                     } else {
-                        prefs.edit().putBoolean("fb_desktop", !tab.desktop()).apply();
+                        prefs.edit().putInt("fb_mode", which - 2).apply();
                         tab.applyMode();
                         tab.web.loadUrl(tab.startUrl);
                     }
@@ -270,16 +282,13 @@ public class MainActivity extends Activity {
             });
         }
 
-        boolean desktop() {
-            return kind == Kind.MESSENGER && prefs.getBoolean("fb_desktop", false);
-        }
-
         void applyMode() {
             WebSettings s = web.getSettings();
-            boolean d = desktop();
-            s.setUserAgentString(d ? desktopUA : mobileUA);
-            s.setUseWideViewPort(d);
-            s.setLoadWithOverviewMode(d);
+            int mode = kind == Kind.MESSENGER ? fbMode() : FB_MOBILE;
+            // Facebook's mobile site no longer lets you message, so Messenger uses the desktop site.
+            s.setUserAgentString(mode == FB_MOBILE ? mobileUA : desktopUA);
+            s.setUseWideViewPort(mode == FB_WIDE);
+            s.setLoadWithOverviewMode(mode == FB_WIDE);
         }
     }
 
@@ -521,7 +530,10 @@ public class MainActivity extends Activity {
                 break;
             case MESSENGER:
             default:
-                css = "a[href=\"/\"],a[href^=\"/marketplace\"],a[href^=\"/notifications\"]{display:none!important}";
+                // [role=banner] = Facebook's top bar (Home, Video, Marketplace, notifications...)
+                css = "a[href=\"/\"],a[href^=\"/marketplace\"],a[href^=\"/notifications\"],"
+                        + "a[href^=\"/watch\"],a[href^=\"/groups\"],a[href^=\"/gaming\"],"
+                        + "[role=\"banner\"]{display:none!important}";
                 break;
         }
         boolean storiesHome = tab.kind == Kind.IG_STORIES && isLoggedIn(true);
