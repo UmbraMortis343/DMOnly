@@ -554,12 +554,22 @@ public class MainActivity extends Activity {
                 + " if(!FBFIT||!document.body)return;"
                 + " var inbox=/^\\/messages\\/?$/.test(location.pathname);"
                 + " document.body.classList.toggle('dmfb-list',inbox);"
-                + " if(!inbox)return;"
+                + " if(!inbox){fbMiss=0;return;}"
                 + " var l=document.querySelector('[role=navigation][aria-label=\"Thread list\"]');"
                 + " for(var e=l&&l.parentElement;e&&e!==document.body;e=e.parentElement){"
                 + "  if(getComputedStyle(e).display==='none'){e.style.setProperty('display','flex','important');e.dataset.dmfb='1';}"
                 + " }"
+                // After leaving a chat, Facebook sometimes doesn't bring the list back until the
+                // screen size changes (e.g. rotating). Nudge it with a resize, then reload once.
+                + " var ok=l&&l.getBoundingClientRect().width>50&&l.getBoundingClientRect().height>50;"
+                + " if(ok){fbMiss=0;return;}"
+                + " if(!document.querySelector('[role=main]'))return;"   // page still loading
+                + " fbMiss++;"
+                + " if(fbMiss===2||fbMiss===4)window.dispatchEvent(new Event('resize'));"
+                + " if(fbMiss===8){var t=0;try{t=+sessionStorage.getItem('dmfbReload')||0;}catch(x){}"
+                + "  if(Date.now()-t>15000){try{sessionStorage.setItem('dmfbReload',Date.now());}catch(x){}location.reload();}}"
                 + "}"
+                + "var fbMiss=0;"
                 // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
                 + "function hideBars(){"
                 + " if(!STORIES||location.pathname!=='/')return;"
