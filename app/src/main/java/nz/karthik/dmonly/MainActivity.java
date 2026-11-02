@@ -59,9 +59,10 @@ public class MainActivity extends Activity {
     enum Verdict { ALLOW, BOUNCE, EXTERNAL, IGNORE }
 
     private static final String IG_DMS_URL = "https://www.instagram.com/direct/inbox/";
-    // Instagram home: story circles + feed (suggested / sponsored posts are hidden by the page script).
-    // (The ?variant=following feed has no story circles, so it isn't used.)
-    private static final String IG_STORIES_URL = "https://www.instagram.com/";
+    // Stories tab = two stacked pages: a strip of Instagram's home page cropped to the story
+    // circles (IG_TRAY_URL), and below it the "Following" feed (only accounts you follow).
+    private static final String IG_STORIES_URL = "https://www.instagram.com/?variant=following";
+    private static final String IG_TRAY_URL = "https://www.instagram.com/";
     private static final String MESSENGER_URL = "https://www.facebook.com/messages/";
 
     private static final int FB_FIT = 0;     // desktop site laid out at phone width (default)
@@ -103,6 +104,9 @@ public class MainActivity extends Activity {
     private long lastToast;
     private String mobileUA;
     private String desktopUA;
+    private Tab feedTab;          // Stories tab: the Following feed
+    private Tab trayTab;          // Stories tab: the cropped story-circles strip
+    private int trayHeightPx;
 
     // ------------------------------------------------------------------ setup
 
@@ -144,13 +148,26 @@ public class MainActivity extends Activity {
 
         CookieManager.getInstance().setAcceptCookie(true);
 
-        tabs.add(new Tab(Kind.IG_DMS, "DMs", IG_DMS_URL));
-        tabs.add(new Tab(Kind.IG_STORIES, "Stories", IG_STORIES_URL));
-        tabs.add(new Tab(Kind.MESSENGER, "Messenger", MESSENGER_URL));
+        tabs.add(new Tab(Kind.IG_DMS, "DMs", IG_DMS_URL, false));
+        feedTab = new Tab(Kind.IG_STORIES, "Stories", IG_STORIES_URL, false);
+        tabs.add(feedTab);
+        tabs.add(new Tab(Kind.MESSENGER, "Messenger", MESSENGER_URL, false));
+
+        // Stories tab layout: [story-circles strip] above [Following feed].
+        trayTab = new Tab(Kind.IG_STORIES, "Stories", IG_TRAY_URL, true);
+        trayTab.web.setVerticalScrollBarEnabled(false);
+        trayHeightPx = dp(112);
+        LinearLayout storiesBox = new LinearLayout(this);
+        storiesBox.setOrientation(LinearLayout.VERTICAL);
+        storiesBox.addView(trayTab.web, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, trayHeightPx));
+        storiesBox.addView(feedTab.web, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        feedTab.root = storiesBox;
 
         for (Tab t : tabs) {
             bar.addView(t.button, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            content.addView(t.web, new FrameLayout.LayoutParams(
+            content.addView(t.root, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
 
@@ -163,7 +180,7 @@ public class MainActivity extends Activity {
         current = tab;
         for (Tab t : tabs) {
             boolean on = t == tab;
-            t.web.setVisibility(on ? View.VISIBLE : View.GONE);
+            t.root.setVisibility(on ? View.VISIBLE : View.GONE);
             t.button.setTextColor(getColor(on ? R.color.bar_active : R.color.bar_fg));
             t.button.setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
         }
@@ -171,7 +188,45 @@ public class MainActivity extends Activity {
             tab.loaded = true;
             tab.web.loadUrl(tab.startUrl);
         }
+        if (tab == feedTab && !trayTab.loaded) loadTray();
+        updateStoriesLayout();
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
+    }
+
+    private void loadTray() {
+        trayTab.loaded = true;
+        trayTab.loadedLoggedIn = isLoggedIn(true);
+        trayTab.web.loadUrl(IG_TRAY_URL);
+    }
+
+    /**
+     * Stories tab: show the story strip above the feed only on the feed page. Open a story
+     * -> the strip goes full screen. Comments / posts / anything else -> strip hidden.
+     */
+    private void updateStoriesLayout() {
+        if (trayTab == null || feedTab == null) return;
+        boolean loggedIn = isLoggedIn(true);
+        if (loggedIn && trayTab.loaded && !trayTab.loadedLoggedIn) loadTray();   // just signed in
+        String tp = trayTab.lastPath;
+        boolean storyOpen = !tp.isEmpty() && !tp.equals("/");   // a story (or a reply chat) is open
+        String fp = feedTab.lastPath;
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) trayTab.web.getLayoutParams();
+        if (!loggedIn) {
+            trayTab.web.setVisibility(View.GONE);
+            feedTab.web.setVisibility(View.VISIBLE);
+        } else if (storyOpen) {
+            lp.height = 0;
+            lp.weight = 1f;
+            trayTab.web.setVisibility(View.VISIBLE);
+            feedTab.web.setVisibility(View.GONE);
+        } else {
+            lp.height = trayHeightPx;
+            lp.weight = 0f;
+            feedTab.web.setVisibility(View.VISIBLE);
+            boolean onFeed = fp.isEmpty() || fp.equals("/");
+            trayTab.web.setVisibility(onFeed ? View.VISIBLE : View.GONE);
+        }
+        trayTab.web.setLayoutParams(lp);
     }
 
     private int fbMode() {
@@ -182,6 +237,7 @@ public class MainActivity extends Activity {
     private void onTabTap(Tab tab) {
         if (tab == current) {
             tab.web.loadUrl(tab.startUrl);   // tap the tab you're on = back to the inbox
+            if (tab == feedTab) loadTray();
         } else {
             select(tab);
         }
@@ -203,8 +259,10 @@ public class MainActivity extends Activity {
                     select(tab);
                     if (which == 0) {
                         tab.web.reload();
+                        if (tab == feedTab) loadTray();
                     } else if (which == 1) {
                         tab.web.loadUrl(tab.startUrl);
+                        if (tab == feedTab) loadTray();
                     } else {
                         prefs.edit().putInt("fb_mode", which - 2).apply();
                         tab.applyMode();
@@ -222,8 +280,11 @@ public class MainActivity extends Activity {
         final String startUrl;
         final WebView web;
         final TextView button;
+        final boolean isTray;   // the cropped story-circles strip in the Stories tab
+        View root;              // what the tab shows (the WebView, or the Stories stack)
 
         boolean loaded;
+        boolean loadedLoggedIn;
         String lastSafeUrl;     // last chat/inbox URL: where we send you back to
         String mediaKey;        // the one reel/post you're allowed to be watching
         boolean mediaFromShare; // share links redirect once to the real reel URL
@@ -233,11 +294,12 @@ public class MainActivity extends Activity {
         long bounceWindowStart;
 
         @SuppressLint("SetJavaScriptEnabled")
-        Tab(Kind kind, String label, String startUrl) {
+        Tab(Kind kind, String label, String startUrl, boolean isTray) {
             this.kind = kind;
             this.label = label;
             this.startUrl = startUrl;
             this.lastSafeUrl = startUrl;
+            this.isTray = isTray;
 
             button = new TextView(MainActivity.this);
             button.setText(label);
@@ -283,6 +345,7 @@ public class MainActivity extends Activity {
                     onUrlChanged(Tab.this, url);
                 }
             });
+            root = web;
         }
 
         void applyMode() {
@@ -306,6 +369,20 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void onUrl(String url) {
             main.post(() -> onUrlChanged(tab, url));
+        }
+
+        /** Story strip: height (CSS px) of the story-circles row, so the strip fits it exactly. */
+        @JavascriptInterface
+        public void trayHeight(int cssPx) {
+            if (!tab.isTray) return;
+            main.post(() -> {
+                float d = getResources().getDisplayMetrics().density;
+                int px = Math.max(dp(60), Math.min(dp(240), Math.round(cssPx * d) + dp(4)));
+                if (Math.abs(px - trayHeightPx) > 2) {
+                    trayHeightPx = px;
+                    updateStoriesLayout();
+                }
+            });
         }
     }
 
@@ -341,6 +418,7 @@ public class MainActivity extends Activity {
         String path = uri.getPath() == null ? "" : uri.getPath();
         boolean wasThread = tab.lastPath.matches("^/messages/.*t/.+");
         tab.lastPath = path;
+        if (tab.kind == Kind.IG_STORIES) updateStoriesLayout();
         if (tab.kind == Kind.MESSENGER && fbMode() == FB_FIT && isFbHost(lower(uri.getHost()))
                 && wasThread && path.matches("^/messages/?$")) {
             tab.web.loadUrl(MESSENGER_URL);
@@ -418,7 +496,7 @@ public class MainActivity extends Activity {
         // the stories row shows.
         if (ig && path.equals("/")) {
             if (tab.kind == Kind.IG_STORIES) {
-                tab.lastSafeUrl = IG_STORIES_URL;
+                tab.lastSafeUrl = tab.startUrl;
                 clearMedia(tab);
                 return Verdict.ALLOW;
             }
@@ -538,6 +616,7 @@ public class MainActivity extends Activity {
                         + "body.dmonly-home a[href=\"/\"],"
                         + "body.dmonly-home [role=\"progressbar\"],"
                         + "body.dmonly-home svg[aria-label^=\"Loading\"],"
+                        + "body.dmonly-home .dmonly-sib,"
                         + "body.dmonly-home .dmonly-hide{display:none!important}";
                 break;
             case MESSENGER:
@@ -563,6 +642,7 @@ public class MainActivity extends Activity {
                 + "var STORIES=" + storiesHome + ";"
                 + "var FBFIT=" + fbFit + ";"
                 + "var IGTAB=" + igTab + ";"
+                + "var TRAY=" + tab.isTray + ";"
                 // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
                 // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
                 + "function hideNav(){"
@@ -598,7 +678,7 @@ public class MainActivity extends Activity {
                 + "var fbMiss=0;"
                 // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
                 + "function hideBars(){"
-                + " if(!STORIES||location.pathname!=='/')return;"
+                + " if(!STORIES||TRAY||location.pathname!=='/')return;"
                 + " [innerHeight-8].forEach(function(y){"
                 + "  var els=document.elementsFromPoint(innerWidth/2,y)||[];"
                 + "  for(var i=0;i<els.length;i++){var e=els[i];"
@@ -618,11 +698,16 @@ public class MainActivity extends Activity {
                 // account carousels, and everything after a "Suggested posts" heading.
                 + "function xp(q){var r=document.evaluate(q,document,null,7,null),a=[];"
                 + " for(var i=0;i<r.snapshotLength;i++)a.push(r.snapshotItem(i));return a;}"
+                // Instagram removes posts you've scrolled past, so climb only a few small levels
+                // (never a big container) - otherwise this could hide the whole feed.
                 + "function hideBlock(e){var n=e;"
-                + " while(n.parentElement&&n.parentElement!==document.body&&!n.parentElement.querySelector('article,canvas'))n=n.parentElement;"
+                + " for(var k=0;k<6&&n.parentElement&&n.parentElement!==document.body;k++){"
+                + "  var p=n.parentElement;"
+                + "  if(p.querySelector('article,canvas')||p.getBoundingClientRect().height>innerHeight*0.6)break;"
+                + "  n=p;}"
                 + " n.classList.add('dmonly-hide');}"
                 + "function cleanFeed(){"
-                + " if(!STORIES||location.pathname!=='/')return;"
+                + " if(!STORIES||TRAY||location.pathname!=='/')return;"
                 + " xp(\"//article[.//*[not(*) and (normalize-space(.)='Sponsored' or normalize-space(.)='Suggested for you')]]\")"
                 + "  .forEach(function(a){a.classList.add('dmonly-hide');});"
                 + " var m=xp(\"//*[not(*) and translate(normalize-space(.),'SP','sp')='suggested posts']\")[0];"
@@ -631,6 +716,29 @@ public class MainActivity extends Activity {
                 + " xp(\"//*[not(*) and (normalize-space(.)='Suggested for you' or translate(normalize-space(.),'SR','sr')='suggested reels')]\").forEach(function(e){"
                 + "  if(!e.closest('article'))hideBlock(e);});"
                 + "}"
+                // Story strip: keep only the row of story circles (rings are <canvas>, links go
+                // to /stories/), hide everything around it, and tell the app how tall it is.
+                + "var trayH=0;"
+                + "function trayOnly(){"
+                + " if(!STORIES||!TRAY||location.pathname!=='/')return;"
+                + " var c=[].slice.call(document.querySelectorAll('canvas,a[href^=\"/stories/\"]')).filter(function(e){"
+                + "  return !e.closest('article')&&!e.closest('.dmonly-sib')&&!e.closest('.dmonly-hide');});"
+                + " if(c.length<2)return;"
+                + " var t=c[0];"
+                + " for(var i=1;i<c.length&&t;i++){while(t&&!t.contains(c[i]))t=t.parentElement;}"
+                + " if(!t||t===document.body||t===document.documentElement)return;"
+                + " var n=t;"
+                + " while(n&&n.parentElement&&n!==document.body){"
+                + "  var p=n.parentElement;"
+                + "  for(var k=0;k<p.children.length;k++){var s=p.children[k];"
+                + "   if(s===n||s.tagName==='SCRIPT'||s.tagName==='STYLE'||s.id==='dmonly-css')continue;"
+                + "   if(s.getAttribute('role')==='dialog'||s.querySelector('[role=dialog]'))continue;"
+                + "   s.classList.add('dmonly-sib');}"
+                + "  n=p;}"
+                + " if(window.scrollY)window.scrollTo(0,0);"
+                + " var h=Math.ceil(t.getBoundingClientRect().bottom);"
+                + " if(h>30&&Math.abs(h-trayH)>2){trayH=h;try{DMOnly.trayHeight(h);}catch(x){}}"
+                + "}"
                 + "function ensure(){"
                 + " var s=document.getElementById('dmonly-css');"
                 + " if(!s){s=document.createElement('style');s.id='dmonly-css';s.textContent=css;"
@@ -638,6 +746,7 @@ public class MainActivity extends Activity {
                 + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
                 + " try{hideBars();}catch(e){}"
                 + " try{cleanFeed();}catch(e){}"
+                + " try{trayOnly();}catch(e){}"
                 + " try{hideNav();}catch(e){}"
                 + " try{fbList();}catch(e){}"
                 + "}"
@@ -771,8 +880,12 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     @Override
     public void onBackPressed() {
+        boolean storyOpen = current == feedTab && trayTab.web.getVisibility() == View.VISIBLE
+                && feedTab.web.getVisibility() == View.GONE;
         if (customView != null) {
             hideCustomView();
+        } else if (storyOpen) {
+            trayTab.web.loadUrl(IG_TRAY_URL);   // close the story, back to the feed
         } else if (current != null && current.web.canGoBack()) {
             current.web.goBack();
         } else {
@@ -791,6 +904,7 @@ public class MainActivity extends Activity {
         for (Tab t : tabs) {
             t.web.destroy();
         }
+        if (trayTab != null) trayTab.web.destroy();
         super.onDestroy();
     }
 
