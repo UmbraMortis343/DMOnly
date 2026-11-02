@@ -59,8 +59,9 @@ public class MainActivity extends Activity {
     enum Verdict { ALLOW, BOUNCE, EXTERNAL, IGNORE }
 
     private static final String IG_DMS_URL = "https://www.instagram.com/direct/inbox/";
-    // Instagram's "Following" feed: only accounts you follow, newest first, no suggestions.
-    private static final String IG_STORIES_URL = "https://www.instagram.com/?variant=following";
+    // Instagram home: story circles + feed (suggested / sponsored posts are hidden by the page script).
+    // (The ?variant=following feed has no story circles, so it isn't used.)
+    private static final String IG_STORIES_URL = "https://www.instagram.com/";
     private static final String MESSENGER_URL = "https://www.facebook.com/messages/";
 
     private static final int FB_FIT = 0;     // desktop site laid out at phone width (default)
@@ -520,13 +521,13 @@ public class MainActivity extends Activity {
         String css;
         switch (tab.kind) {
             case IG_DMS:
-                css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"],a[href=\"/\"]"
-                        + "{display:none!important}";
+                css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"],a[href=\"/\"],"
+                        + ".dmonly-nav{display:none!important}";
                 break;
             case IG_STORIES:
                 // On the home page: stories + posts from people you follow. Hide the nav bars,
                 // the DM / notification / create buttons, and suggested / sponsored posts.
-                css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"]{display:none!important}"
+                css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"],.dmonly-nav{display:none!important}"
                         + "body.dmonly-home nav,"
                         + "body.dmonly-home [role=\"navigation\"],"
                         + "body.dmonly-home footer,"
@@ -555,11 +556,25 @@ public class MainActivity extends Activity {
         }
         boolean storiesHome = tab.kind == Kind.IG_STORIES && isLoggedIn(true);
         boolean fbFit = tab.kind == Kind.MESSENGER && fbMode() == FB_FIT;
+        boolean igTab = tab.kind != Kind.MESSENGER && isLoggedIn(true);
         String js = "(function(){"
                 + "if(window.__dmonly)return;window.__dmonly=true;"
                 + "var css=" + JSONObject.quote(css) + ";"
                 + "var STORIES=" + storiesHome + ";"
                 + "var FBFIT=" + fbFit + ";"
+                + "var IGTAB=" + igTab + ";"
+                // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
+                // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
+                + "function hideNav(){"
+                + " if(!IGTAB)return;"
+                + " document.querySelectorAll('a[href=\"/explore/\"],a[href^=\"/reels\"]').forEach(function(a){"
+                + "  for(var e=a;e&&e!==document.body;e=e.parentElement){"
+                + "   var p=getComputedStyle(e).position;"
+                + "   if((p==='fixed'||p==='sticky')&&e.getBoundingClientRect().height<140){e.classList.add('dmonly-nav');return;}"
+                + "  }"
+                + "  var n=a.closest('nav,[role=navigation]');if(n)n.classList.add('dmonly-nav');"
+                + " });"
+                + "}"
                 // Facebook inbox at phone width: show the chat list instead of the empty chat panel.
                 + "function fbList(){"
                 + " if(!FBFIT||!document.body)return;"
@@ -613,7 +628,7 @@ public class MainActivity extends Activity {
                 + " var m=xp(\"//*[not(*) and translate(normalize-space(.),'SP','sp')='suggested posts']\")[0];"
                 + " if(m){document.querySelectorAll('article').forEach(function(a){"
                 + "  if(m.compareDocumentPosition(a)&4)a.classList.add('dmonly-hide');});hideBlock(m);}"
-                + " xp(\"//*[not(*) and normalize-space(.)='Suggested for you']\").forEach(function(e){"
+                + " xp(\"//*[not(*) and (normalize-space(.)='Suggested for you' or translate(normalize-space(.),'SR','sr')='suggested reels')]\").forEach(function(e){"
                 + "  if(!e.closest('article'))hideBlock(e);});"
                 + "}"
                 + "function ensure(){"
@@ -623,6 +638,7 @@ public class MainActivity extends Activity {
                 + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
                 + " try{hideBars();}catch(e){}"
                 + " try{cleanFeed();}catch(e){}"
+                + " try{hideNav();}catch(e){}"
                 + " try{fbList();}catch(e){}"
                 + "}"
                 + "var last='';"
