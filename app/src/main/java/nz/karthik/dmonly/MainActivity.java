@@ -372,6 +372,10 @@ public class MainActivity extends Activity {
 
         if (isAuth(path)) return Verdict.ALLOW;
 
+        // Not signed in yet: there's no feed to block, and the login form often lives
+        // at the home page, so let everything through until you've signed in.
+        if (!isLoggedIn(ig)) return Verdict.ALLOW;
+
         boolean tabIsIg = tab.kind != Kind.MESSENGER;
 
         // Chats
@@ -436,6 +440,13 @@ public class MainActivity extends Activity {
         tab.mediaFromShare = false;
     }
 
+    private static boolean isLoggedIn(boolean ig) {
+        String c = CookieManager.getInstance().getCookie(
+                ig ? "https://www.instagram.com/" : "https://www.facebook.com/");
+        if (c == null) return false;
+        return ig ? (c.contains("sessionid=") || c.contains("ds_user_id=")) : c.contains("c_user=");
+    }
+
     private static boolean isAuth(String path) {
         String p = path.toLowerCase(Locale.ROOT);
         return AUTH.matcher(path).find() || p.contains("login") || p.contains("checkpoint");
@@ -491,22 +502,53 @@ public class MainActivity extends Activity {
                         + "{display:none!important}";
                 break;
             case IG_STORIES:
+                // On the home page: hide the feed, the nav bars, and the DM / notification / create buttons.
                 css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"]{display:none!important}"
-                        + "body.dmonly-home main article{display:none!important}";
+                        + "body.dmonly-home main article,"
+                        + "body.dmonly-home nav,"
+                        + "body.dmonly-home [role=\"navigation\"],"
+                        + "body.dmonly-home footer,"
+                        + "body.dmonly-home a[href^=\"/direct\"],"
+                        + "body.dmonly-home a[href*=\"/accounts/activity\"],"
+                        + "body.dmonly-home a[href^=\"/notifications\"],"
+                        + "body.dmonly-home a[href^=\"/create\"],"
+                        + "body.dmonly-home a[href=\"/\"],"
+                        + "body.dmonly-home .dmonly-hide{display:none!important}";
                 break;
             case MESSENGER:
             default:
                 css = "a[href=\"/\"],a[href^=\"/marketplace\"],a[href^=\"/notifications\"]{display:none!important}";
                 break;
         }
+        boolean storiesHome = tab.kind == Kind.IG_STORIES && isLoggedIn(true);
         String js = "(function(){"
                 + "if(window.__dmonly)return;window.__dmonly=true;"
                 + "var css=" + JSONObject.quote(css) + ";"
+                + "var STORIES=" + storiesHome + ";"
+                // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
+                + "function hideBars(){"
+                + " if(!STORIES||location.pathname!=='/')return;"
+                + " [innerHeight-8].forEach(function(y){"
+                + "  var els=document.elementsFromPoint(innerWidth/2,y)||[];"
+                + "  for(var i=0;i<els.length;i++){var e=els[i];"
+                + "   while(e&&e!==document.body&&e!==document.documentElement){"
+                + "    var p=getComputedStyle(e).position;"
+                + "    if((p==='fixed'||p==='sticky')&&e.getBoundingClientRect().height<140){e.classList.add('dmonly-hide');break;}"
+                + "    e=e.parentElement;}"
+                + "  }"
+                + " });"
+                + " document.querySelectorAll('svg[aria-label]').forEach(function(s){"
+                + "  var l=s.getAttribute('aria-label').toLowerCase();"
+                + "  if(/messenger|direct|notification|activity|new post|create|home|search|explore|reels/.test(l)){"
+                + "   var b=s.closest('a,button,[role=button]');if(b)b.classList.add('dmonly-hide');}"
+                + " });"
+                + "}"
                 + "function ensure(){"
                 + " var s=document.getElementById('dmonly-css');"
                 + " if(!s){s=document.createElement('style');s.id='dmonly-css';s.textContent=css;"
                 + "  (document.head||document.documentElement).appendChild(s);}"
-                + " if(document.body)document.body.classList.toggle('dmonly-home',location.pathname==='/');"
+                + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
+                + " try{hideBars();}catch(e){}"
                 + "}"
                 + "var last='';"
                 + "setInterval(function(){ensure();"
