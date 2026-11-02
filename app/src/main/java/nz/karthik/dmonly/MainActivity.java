@@ -530,17 +530,36 @@ public class MainActivity extends Activity {
                 break;
             case MESSENGER:
             default:
-                // [role=banner] = Facebook's top bar (Home, Video, Marketplace, notifications...)
+                // Hide the feed bits of Facebook's top bar but keep the bar itself (it has the
+                // phone-layout controls). On the inbox page, force the chat list to show.
                 css = "a[href=\"/\"],a[href^=\"/marketplace\"],a[href^=\"/notifications\"],"
-                        + "a[href^=\"/watch\"],a[href^=\"/groups\"],a[href^=\"/gaming\"],"
-                        + "[role=\"banner\"]{display:none!important}";
+                        + "a[href^=\"/watch\"],a[href^=\"/reel\"],a[href^=\"/groups\"],a[href^=\"/gaming\"],"
+                        + "[aria-label=\"Facebook menu\"],[aria-label^=\"Notifications\"],"
+                        + "input[aria-label=\"Search Facebook\"]{display:none!important}"
+                        + "body.dmfb-list [role=\"main\"]{display:none!important}"
+                        + "body.dmfb-list [role=\"navigation\"][aria-label=\"Thread list\"]{"
+                        + "display:flex!important;visibility:visible!important;width:auto!important;"
+                        + "max-width:none!important;flex:1 1 auto!important;transform:none!important}";
                 break;
         }
         boolean storiesHome = tab.kind == Kind.IG_STORIES && isLoggedIn(true);
+        boolean fbFit = tab.kind == Kind.MESSENGER && fbMode() == FB_FIT;
         String js = "(function(){"
                 + "if(window.__dmonly)return;window.__dmonly=true;"
                 + "var css=" + JSONObject.quote(css) + ";"
                 + "var STORIES=" + storiesHome + ";"
+                + "var FBFIT=" + fbFit + ";"
+                // Facebook inbox at phone width: show the chat list instead of the empty chat panel.
+                + "function fbList(){"
+                + " if(!FBFIT||!document.body)return;"
+                + " var inbox=/^\\/messages\\/?$/.test(location.pathname);"
+                + " document.body.classList.toggle('dmfb-list',inbox);"
+                + " if(!inbox)return;"
+                + " var l=document.querySelector('[role=navigation][aria-label=\"Thread list\"]');"
+                + " for(var e=l&&l.parentElement;e&&e!==document.body;e=e.parentElement){"
+                + "  if(getComputedStyle(e).display==='none'){e.style.setProperty('display','flex','important');e.dataset.dmfb='1';}"
+                + " }"
+                + "}"
                 // Hide any bar pinned to the top/bottom edge (Instagram's tab bar + top bar).
                 + "function hideBars(){"
                 + " if(!STORIES||location.pathname!=='/')return;"
@@ -585,6 +604,7 @@ public class MainActivity extends Activity {
                 + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
                 + " try{hideBars();}catch(e){}"
                 + " try{trayOnly();}catch(e){}"
+                + " try{fbList();}catch(e){}"
                 + "}"
                 + "var last='';"
                 + "setInterval(function(){ensure();"
