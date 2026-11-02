@@ -59,7 +59,8 @@ public class MainActivity extends Activity {
     enum Verdict { ALLOW, BOUNCE, EXTERNAL, IGNORE }
 
     private static final String IG_DMS_URL = "https://www.instagram.com/direct/inbox/";
-    private static final String IG_STORIES_URL = "https://www.instagram.com/";
+    // Instagram's "Following" feed: only accounts you follow, newest first, no suggestions.
+    private static final String IG_STORIES_URL = "https://www.instagram.com/?variant=following";
     private static final String MESSENGER_URL = "https://www.facebook.com/messages/";
 
     private static final int FB_FIT = 0;     // desktop site laid out at phone width (default)
@@ -523,9 +524,9 @@ public class MainActivity extends Activity {
                         + "{display:none!important}";
                 break;
             case IG_STORIES:
-                // On the home page: hide the feed, the nav bars, and the DM / notification / create buttons.
+                // On the home page: stories + posts from people you follow. Hide the nav bars,
+                // the DM / notification / create buttons, and suggested / sponsored posts.
                 css = "a[href=\"/explore/\"],a[href=\"/reels/\"],a[href^=\"/reels/?\"]{display:none!important}"
-                        + "body.dmonly-home main article,"
                         + "body.dmonly-home nav,"
                         + "body.dmonly-home [role=\"navigation\"],"
                         + "body.dmonly-home footer,"
@@ -536,8 +537,6 @@ public class MainActivity extends Activity {
                         + "body.dmonly-home a[href=\"/\"],"
                         + "body.dmonly-home [role=\"progressbar\"],"
                         + "body.dmonly-home svg[aria-label^=\"Loading\"],"
-                        + "body.dmonly-home [data-visualcompletion=\"loading-state\"],"
-                        + "body.dmonly-home .dmonly-sib,"
                         + "body.dmonly-home .dmonly-hide{display:none!important}";
                 break;
             case MESSENGER:
@@ -600,24 +599,22 @@ public class MainActivity extends Activity {
                 + "   var b=s.closest('a,button,[role=button]');if(b)b.classList.add('dmonly-hide');}"
                 + " });"
                 + "}"
-                // Keep only the story circles: find the row that holds them (story rings are
-                // <canvas>, story links go to /stories/), then hide everything around it.
-                + "function trayOnly(){"
+                // Feed clean-up: hide sponsored / suggested posts, the "Suggested for you"
+                // account carousels, and everything after a "Suggested posts" heading.
+                + "function xp(q){var r=document.evaluate(q,document,null,7,null),a=[];"
+                + " for(var i=0;i<r.snapshotLength;i++)a.push(r.snapshotItem(i));return a;}"
+                + "function hideBlock(e){var n=e;"
+                + " while(n.parentElement&&n.parentElement!==document.body&&!n.parentElement.querySelector('article,canvas'))n=n.parentElement;"
+                + " n.classList.add('dmonly-hide');}"
+                + "function cleanFeed(){"
                 + " if(!STORIES||location.pathname!=='/')return;"
-                + " var c=[].slice.call(document.querySelectorAll('canvas,a[href^=\"/stories/\"]')).filter(function(e){"
-                + "  return !e.closest('article')&&!e.closest('.dmonly-sib')&&!e.closest('.dmonly-hide');});"
-                + " if(c.length<2)return;"
-                + " var t=c[0];"
-                + " for(var i=1;i<c.length&&t;i++){while(t&&!t.contains(c[i]))t=t.parentElement;}"
-                + " if(!t||t===document.body||t===document.documentElement)return;"
-                + " var n=t;"
-                + " while(n&&n.parentElement&&n!==document.body){"
-                + "  var p=n.parentElement;"
-                + "  for(var k=0;k<p.children.length;k++){var s=p.children[k];"
-                + "   if(s===n||s.tagName==='SCRIPT'||s.tagName==='STYLE'||s.id==='dmonly-css')continue;"
-                + "   if(s.getAttribute('role')==='dialog'||s.querySelector('[role=dialog]'))continue;"
-                + "   s.classList.add('dmonly-sib');}"
-                + "  n=p;}"
+                + " xp(\"//article[.//*[not(*) and (normalize-space(.)='Sponsored' or normalize-space(.)='Suggested for you')]]\")"
+                + "  .forEach(function(a){a.classList.add('dmonly-hide');});"
+                + " var m=xp(\"//*[not(*) and translate(normalize-space(.),'SP','sp')='suggested posts']\")[0];"
+                + " if(m){document.querySelectorAll('article').forEach(function(a){"
+                + "  if(m.compareDocumentPosition(a)&4)a.classList.add('dmonly-hide');});hideBlock(m);}"
+                + " xp(\"//*[not(*) and normalize-space(.)='Suggested for you']\").forEach(function(e){"
+                + "  if(!e.closest('article'))hideBlock(e);});"
                 + "}"
                 + "function ensure(){"
                 + " var s=document.getElementById('dmonly-css');"
@@ -625,7 +622,7 @@ public class MainActivity extends Activity {
                 + "  (document.head||document.documentElement).appendChild(s);}"
                 + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
                 + " try{hideBars();}catch(e){}"
-                + " try{trayOnly();}catch(e){}"
+                + " try{cleanFeed();}catch(e){}"
                 + " try{fbList();}catch(e){}"
                 + "}"
                 + "var last='';"
