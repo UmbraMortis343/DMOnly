@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'nz.karthik.dmonly'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'nz.karthik.dmonly'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Fixed key so new builds install over old ones without logging you out.
+    // It's a personal sideload key, not a secret.
+    signingConfigs {
+        sideload {
+            storeFile file('sideload.keystore')
+            storePassword 'android'
+            keyAlias 'dmonly'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.sideload
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.sideload
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

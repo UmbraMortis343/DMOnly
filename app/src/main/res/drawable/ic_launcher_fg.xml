@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speech bubble with three dots, sized for the 108dp adaptive-icon canvas -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32C40.2,32 29,41.4 29,53C29,59.6 32.6,65.5 38.3,69.3L36,78L45.6,73.1C48.2,73.7 51,74 54,74C67.8,74 79,64.6 79,53C79,41.4 67.8,32 54,32Z" />
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M43,53m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0M54,53m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0M65,53m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>
