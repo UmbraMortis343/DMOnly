@@ -1657,11 +1657,11 @@ public class MainActivity extends Activity {
                 + "var FBFIT=" + fbFit + ";"
                 + "var IGTAB=" + igTab + ";"
                 + "var TRAY=" + tab.isTray + ";"
-                // Chats, like the Instagram app: swipe a message sideways to reply to it (it slides
-                // with your finger; let go past ~60px), or double-tap it to react with a heart.
-                // Both press the page's own (hidden) Reply / React buttons for that message.
+                // Chats: swipe a message right to reply to it, or left to react with a heart. It
+                // slides with your finger; let go past ~60px. Both press the page's own (hidden)
+                // Reply / React buttons for that message.
                 + "if(IGTAB){(function(){"
-                + "var sx=0,sy=0,row=null,tgt=null,dx=0,dy=0,on=false,dead=false,lastTap=null;"
+                + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false;"
                 + "function thread(){return location.pathname.indexOf('/direct/t/')===0;}"
                 + "function vis(e){var b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.bottom>0&&b.top<innerHeight;}"
                 + "function rowOf(e){var r=e.closest('[role=row]');if(r)return r;"
@@ -1700,7 +1700,7 @@ public class MainActivity extends Activity {
                 + "   taps++;tapEl(t);}"
                 + "  if(tries<20)setTimeout(look,150);}"
                 + " setTimeout(look,120);}"
-                // Double-tap: the message's React button opens Instagram's emoji bar; press its heart.
+                // Heart: the message's React button opens Instagram's emoji bar; press its heart.
                 + "function heart(r,t){var b=findBtn(r,t,null,REACT)||findBtn(document,t,null,REACT);if(!b)return;"
                 + " press(b);var n=0;(function pick(){"
                 + "  var h=[].filter.call(document.querySelectorAll('[role=dialog] [role=button]'),function(e){"
@@ -1710,24 +1710,19 @@ public class MainActivity extends Activity {
                 + " if(!thread()||e.touches.length!==1)return;"
                 + " var t=e.target;if(!t.closest||t.closest('textarea,input,[contenteditable=true],[role=textbox]'))return;"
                 + " var r=rowOf(t);if(!r||r.querySelector('textarea,[contenteditable=true],[role=textbox]'))return;"
-                + " row=r;tgt=t;sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;dy=0;on=false;dead=false;"
+                + " row=r;tgt=t;sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;on=false;dead=false;"
                 + "},{passive:true,capture:true});"
                 + "document.addEventListener('touchmove',function(e){if(!row||dead)return;"
                 + " var mx=e.touches[0].clientX-sx,my=e.touches[0].clientY-sy;"
                 + " if(!on){if(Math.abs(my)>14&&Math.abs(my)>=Math.abs(mx)){dead=true;return;}"
                 + "  if(Math.abs(mx)>14&&Math.abs(mx)>Math.abs(my)*1.5)on=true;else return;}"
-                + " dx=mx;dy=my;row.style.transition='none';"
+                + " dx=mx;row.style.transition='none';"
                 + " row.style.transform='translateX('+Math.max(-80,Math.min(80,dx))+'px)';"
                 + "},{passive:true,capture:true});"
-                + "function end(e){if(!row)return;var r=row,t=tgt,go=on&&Math.abs(dx)>60;row=null;"
+                + "function end(){if(!row)return;var r=row,t=tgt,d=dx,go=on&&Math.abs(d)>60;row=null;"
                 + " r.style.transition='transform .18s';r.style.transform='';"
-                + " if(go){setTimeout(function(){reply(r,t);},200);return;}"
-                + " if(on||dead||!e||e.type!=='touchend')return;"
-                + " var now=Date.now();"
-                + " if(lastTap&&lastTap.r===r&&now-lastTap.at<320&&Math.abs(sx-lastTap.x)<30&&Math.abs(sy-lastTap.y)<30){"
-                + "  lastTap=null;try{e.preventDefault();}catch(x){}heart(r,t);return;}"   // no 2nd click (it would open a photo)
-                + " lastTap={r:r,at:now,x:sx,y:sy};}"
-                + "document.addEventListener('touchend',end,{passive:false,capture:true});"
+                + " if(go)setTimeout(function(){if(d>0)reply(r,t);else heart(r,t);},200);}"
+                + "document.addEventListener('touchend',end,{passive:true,capture:true});"
                 + "document.addEventListener('touchcancel',end,{passive:true,capture:true});"
                 + "})();}"
                 // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
