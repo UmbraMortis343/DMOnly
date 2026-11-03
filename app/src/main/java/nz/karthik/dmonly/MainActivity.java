@@ -1181,6 +1181,7 @@ public class MainActivity extends Activity {
         boolean mediaFromShare; // share links redirect once to the real reel URL
         boolean swipeBounce;    // the pending bounce is a reel swipe
         boolean immersive;      // a story / reel is filling the screen (tab bar hides)
+        boolean desktopSite;    // showing Instagram's desktop site (your Saved collections)
         String lastSeenUrl;
         String lastPath = "";
         int bounceCount;
@@ -1341,6 +1342,18 @@ public class MainActivity extends Activity {
         tab.lastPath = path;
         if (tab.kind == Kind.IG_STORIES) updateStoriesLayout();
         if (tab == current || tab == trayTab) updateTabBar();
+
+        // Your Saved posts: Instagram's phone site shows only "All posts", its desktop site
+        // also lists your collections. So Saved pages load as the desktop site.
+        if (tab.kind != Kind.MESSENGER && !tab.isTray && isIgHost(lower(uri.getHost()))) {
+            boolean saved = path.matches("^/[^/]+/saved(/.*)?$");
+            if (saved != tab.desktopSite) {
+                tab.desktopSite = saved;
+                tab.web.getSettings().setUserAgentString(saved ? desktopUA : mobileUA);
+                tab.web.reload();                 // same page, other site (no extra Back step)
+                return;
+            }
+        }
         if (tab.kind == Kind.MESSENGER && fbMode() == FB_FIT && isFbHost(lower(uri.getHost()))
                 && wasThread && path.matches("^/messages/?$")) {
             tab.web.loadUrl(MESSENGER_URL);
@@ -1968,6 +1981,67 @@ public class MainActivity extends Activity {
         return data.getData() != null ? new Uri[]{data.getData()} : null;
     }
 
+    /**
+     * Photos are re-saved as a normal JPEG (at most 2048 px) before the page uploads them.
+     * Instagram's site refused some phone photos (HEIF / very large / HDR ones: the red
+     * cross in a chat). Videos, GIFs and other files go through unchanged.
+     */
+    private Uri asJpeg(Uri uri) {
+        try {
+            String type = lower(getContentResolver().getType(uri));
+            if (!type.startsWith("image/") || type.equals("image/gif")) return uri;
+            android.graphics.Bitmap bm;
+            if (android.os.Build.VERSION.SDK_INT >= 28) {      // also applies the photo's rotation
+                bm = android.graphics.ImageDecoder.decodeBitmap(
+                        android.graphics.ImageDecoder.createSource(getContentResolver(), uri), (dec, info, src) -> {
+                            int w = info.getSize().getWidth(), h = info.getSize().getHeight();
+                            float sc = Math.min(1f, 2048f / Math.max(w, h));
+                            if (sc < 1f) dec.setTargetSize(Math.round(w * sc), Math.round(h * sc));
+                            dec.setAllocator(android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE);
+                        });
+            } else {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    android.graphics.BitmapFactory.decodeStream(in, null, o);
+                }
+                o.inSampleSize = 1;
+                while (Math.max(o.outWidth, o.outHeight) / (o.inSampleSize * 2) >= 2048) o.inSampleSize *= 2;
+                o.inJustDecodeBounds = false;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    bm = android.graphics.BitmapFactory.decodeStream(in, null, o);
+                }
+                int deg;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    int ori = new android.media.ExifInterface(in).getAttributeInt(
+                            android.media.ExifInterface.TAG_ORIENTATION, 1);
+                    deg = ori == 6 ? 90 : ori == 3 ? 180 : ori == 8 ? 270 : 0;
+                }
+                if (bm != null && deg != 0) {
+                    android.graphics.Matrix m = new android.graphics.Matrix();
+                    m.postRotate(deg);
+                    bm = android.graphics.Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
+                }
+            }
+            if (bm == null) return uri;
+            java.io.File dir = new java.io.File(getCacheDir(), "uploads");
+            java.io.File[] old = dir.listFiles();
+            if (old != null) {
+                for (java.io.File f : old) {
+                    if (System.currentTimeMillis() - f.lastModified() > 86_400_000L) f.delete();
+                }
+            }
+            dir.mkdirs();
+            java.io.File out = new java.io.File(dir, "photo_" + System.currentTimeMillis() + ".jpg");
+            try (java.io.FileOutputStream fo = new java.io.FileOutputStream(out)) {
+                bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, fo);
+            }
+            return Uri.fromFile(out);
+        } catch (Exception | OutOfMemoryError e) {
+            return uri;                                         // send the original instead
+        }
+    }
+
     private static String androidPermissionFor(String resource) {
         if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) return Manifest.permission.RECORD_AUDIO;
         if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) return Manifest.permission.CAMERA;
@@ -1992,8 +2066,17 @@ public class MainActivity extends Activity {
         }
         if (requestCode == REQ_FILE) {
             if (fileCallback != null) {
-                fileCallback.onReceiveValue(pickedFiles(resultCode, data));
+                ValueCallback<Uri[]> cb = fileCallback;
                 fileCallback = null;
+                Uri[] picked = pickedFiles(resultCode, data);
+                if (picked == null) {
+                    cb.onReceiveValue(null);
+                } else {
+                    new Thread(() -> {
+                        for (int k = 0; k < picked.length; k++) picked[k] = asJpeg(picked[k]);
+                        main.post(() -> cb.onReceiveValue(picked));
+                    }).start();
+                }
             }
             if (createMode) {                    // picked nothing -> back to the feed
                 createSawBusy = true;
