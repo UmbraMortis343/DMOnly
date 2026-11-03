@@ -37,8 +37,14 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -69,6 +75,10 @@ public class MainActivity extends Activity {
     private static final String IG_STORIES_URL = "https://www.instagram.com/?variant=following";
     private static final String IG_TRAY_URL = "https://www.instagram.com/";
     private static final String MESSENGER_URL = "https://www.facebook.com/messages/";
+
+    // Public GitHub repo: code, version history and the APK downloads for updates.
+    private static final String REPO = "UmbraMortis343/DMOnly";
+    private static final String RELEASES_PAGE = "https://github.com/" + REPO + "/releases";
 
     private static final int FB_FIT = 0;     // desktop site laid out at phone width (default)
     private static final int FB_WIDE = 1;    // desktop site at full width, zoomed out
@@ -219,6 +229,76 @@ public class MainActivity extends Activity {
         if (start == null) showSettings();
         else select(start);
         main.post(ticker);
+
+        // Quietly check for a newer version at most twice a day.
+        if (System.currentTimeMillis() - prefs.getLong("update_checked", 0) > 12 * 3600_000L) {
+            checkForUpdates(false);
+        }
+    }
+
+    // ------------------------------------------------------------------ updates
+
+    @SuppressWarnings("deprecation")
+    private int currentVersion() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return android.os.Build.VERSION.SDK_INT >= 28 ? (int) pi.getLongVersionCode() : pi.versionCode;
+        } catch (PackageManager.NameNotFoundException e) {
+            return 0;
+        }
+    }
+
+    /** Reads the newest GitHub release; if it's newer than this app, offers to download it. */
+    private void checkForUpdates(boolean manual) {
+        prefs.edit().putLong("update_checked", System.currentTimeMillis()).apply();
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection)
+                        new URL("https://api.github.com/repos/" + REPO + "/releases/latest").openConnection();
+                c.setRequestProperty("Accept", "application/vnd.github+json");
+                c.setRequestProperty("User-Agent", "DMOnly-updater");
+                c.setConnectTimeout(10_000);
+                c.setReadTimeout(10_000);
+                if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                try (InputStream in = c.getInputStream()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                JSONObject rel = new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
+                int latest = Integer.parseInt(rel.getString("tag_name").replaceAll("[^0-9]", ""));
+                String notes = rel.optString("body", "").trim();
+                String apkUrl = null;
+                JSONArray assets = rel.optJSONArray("assets");
+                for (int i = 0; assets != null && i < assets.length(); i++) {
+                    JSONObject a = assets.getJSONObject(i);
+                    if (a.optString("name").endsWith(".apk")) apkUrl = a.optString("browser_download_url");
+                }
+                final String url = apkUrl;
+                main.post(() -> {
+                    if (latest > currentVersion() && url != null) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Update available: version 1." + latest)
+                                .setMessage((notes.isEmpty() ? "" : notes + "\n\n")
+                                        + "Tap Download, then open the file to install. "
+                                        + "You'll stay logged in.")
+                                .setPositiveButton("Download", (d, w) -> openExternal(Uri.parse(url)))
+                                .setNeutralButton("What's new", (d, w) -> openExternal(Uri.parse(RELEASES_PAGE)))
+                                .setNegativeButton("Later", null)
+                                .show();
+                    } else if (manual) {
+                        Toast.makeText(this, "You're up to date (version 1." + currentVersion() + ").",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception e) {
+                if (manual) {
+                    main.post(() -> Toast.makeText(this, "Couldn't check for updates. Try again later.",
+                            Toast.LENGTH_SHORT).show());
+                }
+            }
+        }).start();
     }
 
     // ------------------------------------------------------------------ settings tab
@@ -322,7 +402,25 @@ public class MainActivity extends Activity {
         unlockStatus.setTextColor(getColor(R.color.bar_fg));
         unlockStatus.setPadding(0, dp(8), 0, 0);
         col.addView(unlockStatus);
+
+        addHeader(col, "About & updates");
+        addNote(col, "DM Only version 1." + currentVersion() + ". Open source; not affiliated with Meta.");
+        Button check = new Button(this);
+        check.setText("Check for updates");
+        check.setOnClickListener(v -> checkForUpdates(true));
+        col.addView(check, blp(dp(8)));
+        Button history = new Button(this);
+        history.setText("Version history & code");
+        history.setOnClickListener(v -> openExternal(Uri.parse(RELEASES_PAGE)));
+        col.addView(history, blp(dp(4)));
         return scroll;
+    }
+
+    private LinearLayout.LayoutParams blp(int topMargin) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.topMargin = topMargin;
+        return p;
     }
 
     private void addHeader(LinearLayout col, String text) {
