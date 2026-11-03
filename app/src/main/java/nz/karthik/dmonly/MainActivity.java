@@ -1643,14 +1643,16 @@ public class MainActivity extends Activity {
                 + " try{DMOnly.tap(j);}catch(x){e.click();}}"
                 + "function hover(t){['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){"
                 + " try{t.dispatchEvent(new MouseEvent(n,{bubbles:true,view:window}));}catch(x){}});}"
+                // Instagram keeps each message's React / Reply / More buttons on the page but
+                // invisible (and untappable) until you hover. Pressing the hidden Reply button from
+                // the page works straight away, so do that; only if there isn't one, tap the message.
+                + "function press(e){try{e.click();}catch(x){tapEl(e);}}"
                 + "function reply(r,t){"
-                + " var b=findReply(r);if(b){tapEl(b);return;}"
+                + " var b=findReply(r,t);if(b){press(b);return;}"
                 + " hover(t);"
-                // Then tap the message so its Reply button appears, and keep looking for it for a
-                // while (it can take a moment, or the first tap only closes the keyboard).
                 + " var before=cands(document),taps=0,tries=0;"
-                + " function look(){var b=findReply(r)||findReply(document,r,before);"
-                + "  if(b){tapEl(b);return;}"
+                + " function look(){var b=findReply(r,t)||findReply(document,t,before);"
+                + "  if(b){press(b);return;}"
                 + "  tries++;"
                 + "  if(tries===1||(tries===9&&taps<2)){"
                 + "   if(t.closest('a,img,video')||!document.contains(t))return;"   // tapping a photo / link would open it
