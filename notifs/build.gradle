@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Version number comes from the GitHub Actions run number (-Pvc=123), so every build
+// is newer than the last and the in-app updater can compare them.
+def vc = (project.findProperty('vc') ?: '1').toString().toInteger()
+
+// Release signing key: provided by GitHub Actions from encrypted repository secrets.
+// It is never stored in this repository.
+def ks = System.getenv('DMONLY_KEYSTORE')
+def ksPass = System.getenv('DMONLY_KEYSTORE_PASSWORD')
+
+android {
+    namespace 'nz.karthik.dmonly.notifs'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'nz.karthik.dmonly.notifs'
+        minSdk 26
+        targetSdk 34
+        versionCode vc
+        versionName "1.${vc}"
+    }
+
+    signingConfigs {
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storeType 'pkcs12'
+                storePassword ksPass
+                keyAlias 'dmonly'
+                keyPassword ksPass
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            debuggable false
+            if (ks) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
