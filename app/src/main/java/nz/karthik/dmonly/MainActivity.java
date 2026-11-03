@@ -132,6 +132,7 @@ public class MainActivity extends Activity {
     private Tab trayTab;          // Stories tab: the cropped story-circles strip
     private int trayHeightPx;
     private View storiesToolbar;  // Stories tab: Search / + Post / + Story
+    private long feedFixAt;       // last time the Stories feed was put back on the Following feed
 
     // Settings tab + feed break (temporarily unblocks normal Instagram, max 1 hour)
     private TextView settingsButton;
@@ -690,7 +691,8 @@ public class MainActivity extends Activity {
         boolean loggedIn = isLoggedIn(true);
         if (loggedIn && trayTab.loaded && !trayTab.loadedLoggedIn) loadTray();   // just signed in
         String tp = trayTab.lastPath;
-        boolean storyOpen = !tp.isEmpty() && !tp.equals("/");   // a story (or a reply chat) is open
+        // a story (or a reply chat) is open, or you're making a post / story
+        boolean storyOpen = (!tp.isEmpty() && !tp.equals("/")) || trayCreating;
         String fp = feedTab.lastPath;
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) trayTab.web.getLayoutParams();
         if (!loggedIn || unlocked()) {        // feed break: plain Instagram, no strip
@@ -736,22 +738,68 @@ public class MainActivity extends Activity {
         return row;
     }
 
+    // + Post / + Story: there's no page address for these (instagram.com/create is someone's
+    // profile!). Instead we tap Instagram's own buttons on the story-strip page (Instagram's
+    // home page), and show that page full screen until you've finished or backed out.
+    private boolean trayCreating;   // + Post / + Story in progress
+    private boolean trayBusy;       // Instagram is showing its create screen / dialog
+    private boolean sawBusy;
+    private long createStart;
+
+    private static final String JS_NEW_POST = "(function(){var s=document.querySelector("
+            + "'svg[aria-label=\"New post\"],svg[aria-label=\"New Post\"],svg[aria-label=\"Create\"]');"
+            + "var b=s&&s.closest('a,button,[role=button],[role=link]');if(b){b.click();return 'ok';}return 'none';})()";
+    private static final String JS_NEW_STORY = "(function(){"
+            + "var l=[].slice.call(document.querySelectorAll('span,div')).filter(function(e){"
+            + " return e.childElementCount===0&&/^your story$/i.test((e.textContent||'').trim());});"
+            + "var t=l[0]||document.querySelector('[aria-label*=\"our story\"]');"
+            + "if(!t)return 'none';"
+            + "var c=t.closest('[role=button],button,a,[role=link],li')||t;c.click();return 'ok';})()";
+
     private void onStoriesToolbar(int which) {
-        WebView w = feedTab.web;
         if (which == 0) {
-            w.loadUrl("https://www.instagram.com/explore/search/");
-        } else if (which == 1) {
-            // Use Instagram's own "New post" button (hidden but still on the page);
-            // fall back to its create page if it isn't there.
-            w.evaluateJavascript("(function(){var s=document.querySelector("
-                    + "'svg[aria-label=\"New post\"],svg[aria-label=\"New Post\"],svg[aria-label=\"Create\"]');"
-                    + "var b=s&&s.closest('a,button,[role=button]');if(b){b.click();return 'ok';}return 'none';})()",
-                    r -> {
-                        if (r == null || !r.contains("ok")) w.loadUrl("https://www.instagram.com/create/select/");
-                    });
-        } else {
-            w.loadUrl("https://www.instagram.com/create/story/");
+            feedTab.web.loadUrl("https://www.instagram.com/explore/search/");
+            return;
         }
+        trayCreating = true;
+        trayBusy = false;
+        sawBusy = false;
+        createStart = SystemClock.elapsedRealtime();
+        updateStoriesLayout();
+        trayTab.web.evaluateJavascript("window.__dmCreating=true;" + (which == 1 ? JS_NEW_POST : JS_NEW_STORY),
+                r -> {
+                    if (r == null || !r.contains("ok")) {
+                        endCreating();
+                        toast(which == 1 ? "Couldn't find Instagram's New post button. Try again in a second."
+                                : "Couldn't find \"Your story\". Try again in a second.");
+                    }
+                });
+        main.postDelayed(createWatch, 1500);
+    }
+
+    /** Nothing happened (e.g. you cancelled the photo picker): go back to the feed. */
+    private final Runnable createWatch = new Runnable() {
+        @Override
+        public void run() {
+            if (!trayCreating) return;
+            boolean idle = !trayBusy && fileCallback == null;
+            if (idle && SystemClock.elapsedRealtime() - createStart > 3000) {
+                endCreating();
+                return;
+            }
+            main.postDelayed(this, 1000);
+        }
+    };
+
+    private void endCreating() {
+        if (!trayCreating) return;
+        trayCreating = false;
+        sawBusy = false;
+        trayBusy = false;
+        main.removeCallbacks(createWatch);
+        trayTab.web.evaluateJavascript("window.__dmCreating=false;", null);
+        if (!trayTab.lastPath.equals("/")) loadTray();
+        updateStoriesLayout();
     }
 
     private int fbMode() {
@@ -813,6 +861,7 @@ public class MainActivity extends Activity {
         String lastSafeUrl;     // last chat/inbox URL: where we send you back to
         String mediaKey;        // the one reel/post you're allowed to be watching
         boolean mediaFromShare; // share links redirect once to the real reel URL
+        boolean swipeBounce;    // the pending bounce is a reel swipe
         String lastSeenUrl;
         String lastPath = "";
         int bounceCount;
@@ -896,6 +945,17 @@ public class MainActivity extends Activity {
             main.post(() -> onUrlChanged(tab, url));
         }
 
+        /** Story strip: Instagram's create screen / dialog opened (true) or closed (false). */
+        @JavascriptInterface
+        public void creatingState(boolean busy) {
+            if (!tab.isTray) return;
+            main.post(() -> {
+                trayBusy = busy;
+                if (busy) sawBusy = true;
+                else if (trayCreating && sawBusy) endCreating();   // posted, or cancelled
+            });
+        }
+
         /** Story strip: height (CSS px) of the story-circles row, so the strip fits it exactly. */
         @JavascriptInterface
         public void trayHeight(int cssPx) {
@@ -942,12 +1002,33 @@ public class MainActivity extends Activity {
         // always shows (Facebook often fails to redraw it at phone width).
         String path = uri.getPath() == null ? "" : uri.getPath();
         boolean wasThread = tab.lastPath.matches("^/messages/.*t/.+");
+        String prevPath = tab.lastPath;
         tab.lastPath = path;
         if (tab.kind == Kind.IG_STORIES) updateStoriesLayout();
         if (tab.kind == Kind.MESSENGER && fbMode() == FB_FIT && isFbHost(lower(uri.getHost()))
                 && wasThread && path.matches("^/messages/?$")) {
             tab.web.loadUrl(MESSENGER_URL);
             return;
+        }
+
+        // Stories feed: going back from a profile / search can land on Instagram's normal home
+        // feed (with its own second story row) instead of the Following feed. Put it back.
+        if (tab == feedTab && !unlocked() && isIgHost(lower(uri.getHost())) && isLoggedIn(true)) {
+            long now = SystemClock.elapsedRealtime();
+            boolean cameBack = !prevPath.isEmpty() && !prevPath.equals("/");
+            if (path.equals("/") && cameBack && !"following".equals(uri.getQueryParameter("variant"))
+                    && now - feedFixAt > 8000) {
+                feedFixAt = now;
+                tab.web.loadUrl(IG_STORIES_URL);
+                return;
+            }
+            // Instagram's own back arrow from a search result can go to the Explore grid:
+            // send it to the search page instead of showing "Feed's blocked".
+            if (path.matches("^/explore/?$") && now - feedFixAt > 4000) {
+                feedFixAt = now;
+                tab.web.loadUrl("https://www.instagram.com/explore/search/");
+                return;
+            }
         }
 
         Verdict v = evaluate(tab, uri);
@@ -1061,7 +1142,8 @@ public class MainActivity extends Activity {
                 tab.mediaFromShare = share;
                 return Verdict.ALLOW;
             }
-            return Verdict.BOUNCE;   // you swiped to the next one
+            tab.swipeBounce = true;  // you swiped to the next one: back to the chat / profile
+            return Verdict.BOUNCE;
         }
 
         // Feed, Explore, Reels tab, profiles, Watch, Marketplace, ...
@@ -1079,7 +1161,11 @@ public class MainActivity extends Activity {
             toast("Couldn't get back to your chats. Tap the tab to reset.");
             return;
         }
-        String target = tab.bounceCount > 3 ? tab.startUrl : tab.lastSafeUrl;
+        // Stories feed: blocked pages go back to the Following feed, except reel swipes, which
+        // go back to the profile (or chat) you opened the reel from.
+        String target = tab.bounceCount > 3 ? tab.startUrl
+                : (tab == feedTab && !tab.swipeBounce) ? tab.startUrl : tab.lastSafeUrl;
+        tab.swipeBounce = false;
         clearMedia(tab);
         notifyBlocked();
         tab.web.loadUrl(target);
@@ -1277,9 +1363,19 @@ public class MainActivity extends Activity {
                 + "}"
                 // Story strip: keep only the row of story circles (rings are <canvas>, links go
                 // to /stories/), hide everything around it, and tell the app how tall it is.
-                + "var trayH=0;"
+                + "var trayH=0,lastBusy=null;"
+                // Feed (below the strip): if Instagram shows its own story row there too, hide it.
+                + "function feedNoTray(){"
+                + " if(!STORIES||TRAY||location.pathname!=='/')return;"
+                + " var c=[].slice.call(document.querySelectorAll('canvas,a[href^=\"/stories/\"]')).filter(function(e){"
+                + "  return !e.closest('article')&&!e.closest('.dmonly-hide');});"
+                + " if(c.length<2)return;"
+                + " var t=c[0];"
+                + " for(var i=1;i<c.length&&t;i++){while(t&&!t.contains(c[i]))t=t.parentElement;}"
+                + " if(t&&t!==document.body&&t.getBoundingClientRect().height<260)t.classList.add('dmonly-hide');"
+                + "}"
                 + "function trayOnly(){"
-                + " if(!STORIES||!TRAY||location.pathname!=='/')return;"
+                + " if(!STORIES||!TRAY||location.pathname!=='/'||window.__dmCreating)return;"
                 + " var c=[].slice.call(document.querySelectorAll('canvas,a[href^=\"/stories/\"]')).filter(function(e){"
                 + "  return !e.closest('article')&&!e.closest('.dmonly-sib')&&!e.closest('.dmonly-hide');});"
                 + " if(c.length<2)return;"
@@ -1302,7 +1398,12 @@ public class MainActivity extends Activity {
                 + " var s=document.getElementById('dmonly-css');"
                 + " if(!s){s=document.createElement('style');s.id='dmonly-css';s.textContent=css;"
                 + "  (document.head||document.documentElement).appendChild(s);}"
-                + " if(document.body)document.body.classList.toggle('dmonly-home',STORIES&&location.pathname==='/');"
+                + " if(document.body)document.body.classList.toggle('dmonly-home',"
+                + "  STORIES&&location.pathname==='/'&&!(TRAY&&window.__dmCreating));"
+                // Story strip: tell the app when Instagram's create screen / dialog opens and closes.
+                + " if(TRAY){var busy=!!document.querySelector('[role=dialog]')||location.pathname.indexOf('/create')===0;"
+                + "  if(busy!==lastBusy){lastBusy=busy;try{DMOnly.creatingState(busy);}catch(e){}}}"
+                + " try{feedNoTray();}catch(e){}"
                 + " try{hideBars();}catch(e){}"
                 + " try{cleanFeed();}catch(e){}"
                 + " try{trayOnly();}catch(e){}"
@@ -1446,7 +1547,8 @@ public class MainActivity extends Activity {
         if (customView != null) {
             hideCustomView();
         } else if (storyOpen) {
-            trayTab.web.loadUrl(IG_TRAY_URL);   // close the story, back to the feed
+            if (trayCreating) endCreating();
+            loadTray();                         // close the story / create screen, back to the feed
         } else if (current != null && current.web.canGoBack()) {
             current.web.goBack();
         } else {
