@@ -11,10 +11,10 @@ It shows the normal instagram.com and facebook.com websites and hides the parts 
 
 | Tab | What you get |
 |---|---|
-| **DMs** | Instagram direct messages. Reels/posts friends send you play, but swiping to the next one sends you back to the chat. |
-| **Stories** | Story circles at the top, posts from people you follow (newest first) below. No suggested posts, Explore or Reels. |
+| **DMs** | Instagram direct messages. Posts and reels friends send you open, but swiping to the next reel sends you back. |
+| **Stories** | **Search**, **+ Post** and **+ Story** buttons, story circles, then posts from people you follow (newest first). Search people, open profiles and their posts, follow. No suggested posts, Explore grid or Reels feed. |
 | **Messenger** | Facebook Messenger chats (via facebook.com/messages). |
-| **Settings** | Turn tabs on/off, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
+| **Settings** | Turn tabs on/off, notifications, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
 
 Links to other websites open in your normal browser. Instagram tabs stay in portrait.
 
@@ -40,8 +40,13 @@ Every version and what changed is listed on the [Releases](../../releases) page.
 
 ## Notifications
 
-Websites inside an app can't receive notifications. Keep the official Instagram/Messenger apps installed with
-notifications on if you need them (e.g. on a smartwatch).
+Websites can't receive notifications, so keep the official Instagram and Messenger apps installed with notifications
+on (you can remove them from your home screen). Then turn on **Settings → Notifications** in The Resistance:
+their notifications are re-shown by The Resistance (sender, message, picture, and the Reply/Like buttons, which also
+work on a smartwatch), the originals are removed, and tapping one opens The Resistance instead of the official app.
+
+It needs Android's *notification access*. It only reads Instagram and Messenger notifications and ignores everything
+else. If Android calls it a "restricted setting": *Settings → Apps → The Resistance → ⋮ → Allow restricted settings*.
 
 ## Building it yourself
 
