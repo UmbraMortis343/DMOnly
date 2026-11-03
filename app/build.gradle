@@ -2,6 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
+// Version number comes from the GitHub Actions run number (-Pvc=123), so every build
+// is newer than the last and the in-app updater can compare them.
+def vc = (project.findProperty('vc') ?: '1').toString().toInteger()
+
+// Release signing key: provided by GitHub Actions from encrypted repository secrets.
+// It is never stored in this repository.
+def ks = System.getenv('DMONLY_KEYSTORE')
+def ksPass = System.getenv('DMONLY_KEYSTORE_PASSWORD')
+
 android {
     namespace 'nz.karthik.dmonly'
     compileSdk 34
@@ -10,28 +19,27 @@ android {
         applicationId 'nz.karthik.dmonly'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode vc
+        versionName "1.${vc}"
     }
 
-    // Fixed key so new builds install over old ones without logging you out.
-    // It's a personal sideload key, not a secret.
     signingConfigs {
-        sideload {
-            storeFile file('sideload.keystore')
-            storePassword 'android'
-            keyAlias 'dmonly'
-            keyPassword 'android'
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storeType 'pkcs12'
+                storePassword ksPass
+                keyAlias 'dmonly'
+                keyPassword ksPass
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig signingConfigs.sideload
-        }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.sideload
+            debuggable false
+            if (ks) signingConfig signingConfigs.release
         }
     }
 
