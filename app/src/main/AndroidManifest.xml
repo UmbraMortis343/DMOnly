@@ -6,8 +6,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- Only used if you turn on the notification relay in Settings -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- To see whether the notifications add-on is installed, and to hand a photo / video
+         to the Instagram app (+ Post / + Story > Instagram app). -->
+    <queries>
+        <package android:name="nz.karthik.dmonly.notifs" />
+        <package android:name="com.instagram.android" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -28,16 +33,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Notification relay (Settings > Notifications). Needs "notification access". -->
-        <service
-            android:name=".NotifRelayService"
-            android:label="@string/app_name"
-            android:exported="true"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
     </application>
 </manifest>
