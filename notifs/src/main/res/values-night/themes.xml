@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bar_bg">#000000</color>
+    <color name="bar_fg">#8E8E8E</color>
+    <color name="bar_active">#FFFFFF</color>
+
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/bar_bg</item>
+        <item name="android:navigationBarColor">@color/bar_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/bar_bg</item>
+    </style>
+</resources>
