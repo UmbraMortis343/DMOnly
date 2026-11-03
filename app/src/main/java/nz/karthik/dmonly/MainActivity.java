@@ -1653,6 +1653,16 @@ public class MainActivity extends Activity {
                 + "var TRAY=" + tab.isTray + ";"
                 // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
                 // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
+                // Save -> pick a collection. Instagram's site only opens its "Collections" picker
+                // when you hover over the Save button, which a phone can't do. So after you tap
+                // Save, hover it for you and the picker pops up.
+                + "if(IGTAB){document.addEventListener('click',function(e){var t=e.target;if(!t||!t.closest)return;"
+                + " var b=t.closest('[role=button],button');if(!b||!b.querySelector('svg[aria-label=\"Save\"]'))return;"
+                + " setTimeout(function(){if(!document.contains(b))return;"
+                + "  ['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){try{"
+                + "   var E=n.indexOf('pointer')===0?PointerEvent:MouseEvent;"
+                + "   b.dispatchEvent(new E(n,{bubbles:n!=='pointerenter'&&n!=='mouseenter',view:window,pointerType:'mouse'}));}catch(x){}});"
+                + " },400);},true);}"
                 // Chats: swipe a message sideways to reply to it (like the Instagram app).
                 // The message slides with your finger; let go past ~60px and the page's own
                 // "Reply" button for that message is pressed for you.
