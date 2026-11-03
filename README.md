@@ -1,6 +1,9 @@
-# DM Only
+# The Resistance
 
-An Android app for Instagram DMs and Messenger without the feeds.
+*Talk to your friends without being farmed.*
+
+An Android app for Instagram DMs and Messenger without the feeds. Social apps are built to keep you scrolling;
+this one keeps the useful part (your conversations) and refuses the rest.
 Open source. **Not affiliated with, endorsed by, or connected to Meta, Instagram or Facebook.**
 It shows the normal instagram.com and facebook.com websites and hides the parts that are built to keep you scrolling.
 
@@ -17,10 +20,10 @@ Links to other websites open in your normal browser. Instagram tabs stay in port
 
 ## Install (Android 8+)
 
-1. On your phone, open **[Releases](../../releases/latest)** and tap **DMOnly.apk**.
+1. On your phone, open **[Releases](../../releases/latest)** and tap **TheResistance.apk**.
 2. Allow your browser to install apps when asked, then tap **Install**.
 3. Turn that permission back off afterwards: *Settings → Apps → Special app access → Install unknown apps → your browser → Off*.
-4. Open DM Only and log in to Instagram and Facebook as normal.
+4. Open Resistance and log in to Instagram and Facebook as normal.
 
 ## Updates
 
