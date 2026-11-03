@@ -269,7 +269,27 @@ public class MainActivity extends Activity {
             rootLayout.getWindowVisibleDisplayFrame(r);
             kb = rootLayout.getRootView().getHeight() - r.bottom > dp(150);
         }
-        int vis = kb ? View.GONE : View.VISIBLE;
+        keyboardUp = kb;
+        updateTabBar();
+    }
+
+    private boolean keyboardUp;
+
+    /**
+     * The bottom tab bar hides while you type, and while a story or reel is open: Instagram
+     * sizes its story / reel viewer by screen height, and with the bar showing the viewer came
+     * out too narrow (buttons cut off on the right).
+     */
+    private void updateTabBar() {
+        if (tabBar == null || settingsView == null) return;
+        boolean full = false;
+        if (current != null && current.kind != Kind.MESSENGER && settingsView.getVisibility() != View.VISIBLE) {
+            String p = current.lastPath;
+            if (current == feedTab && trayTab != null && trayTab.web.getVisibility() == View.VISIBLE
+                    && trayTab.lastPath.startsWith("/stories/")) p = trayTab.lastPath;
+            full = p.startsWith("/stories/") || p.matches("^/(?:[A-Za-z0-9._]+/)?reels?/.+");
+        }
+        int vis = keyboardUp || full ? View.GONE : View.VISIBLE;
         if (tabBar.getVisibility() != vis) {
             tabBar.setVisibility(vis);
             tabDivider.setVisibility(vis);
@@ -294,6 +314,7 @@ public class MainActivity extends Activity {
         for (Tab t : tabs) {
             if (t.kind.name().equals(kind) && tabEnabled(t)) {
                 select(t);
+                refreshNow = true;          // show the new message straight away (see onResume)
                 return;
             }
         }
@@ -452,6 +473,7 @@ public class MainActivity extends Activity {
         applyOrientation();
         updateUnlockUi();
         refreshRelayUi();
+        updateTabBar();
         prefs.edit().putInt("tab", -1).apply();
     }
 
@@ -680,6 +702,7 @@ public class MainActivity extends Activity {
         if (tab == feedTab && !trayTab.loaded) loadTray();
         updateStoriesLayout();
         applyOrientation();
+        updateTabBar();
         clearRelayed(tab.kind == Kind.MESSENGER ? TAG_FB : TAG_IG);
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
     }
@@ -1312,6 +1335,7 @@ public class MainActivity extends Activity {
         String prevPath = tab.lastPath;
         tab.lastPath = path;
         if (tab.kind == Kind.IG_STORIES) updateStoriesLayout();
+        if (tab == current || tab == trayTab) updateTabBar();
         if (tab.kind == Kind.MESSENGER && fbMode() == FB_FIT && isFbHost(lower(uri.getHost()))
                 && wasThread && path.matches("^/messages/?$")) {
             tab.web.loadUrl(MESSENGER_URL);
@@ -1622,7 +1646,7 @@ public class MainActivity extends Activity {
                 // "Reply" button for that message is pressed for you.
                 + "if(IGTAB){(function(){"
                 + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false;"
-                + "function thread(){return location.pathname.indexOf('/direct/')===0;}"
+                + "function thread(){return location.pathname.indexOf('/direct/t/')===0;}"
                 + "function vis(e){var b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.bottom>0&&b.top<innerHeight;}"
                 + "function rowOf(e){var r=e.closest('[role=row]');if(r)return r;"
                 + " for(var n=e;n&&n!==document.body;n=n.parentElement){var b=n.getBoundingClientRect();"
@@ -1893,6 +1917,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        resultAt = SystemClock.elapsedRealtime();
         if (requestCode == REQ_IG_PICK) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) sendToInstagramApp(data.getData());
             return;
@@ -1955,6 +1980,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        pausedAt = SystemClock.elapsedRealtime();
         CookieManager.getInstance().flush();   // stay logged in
     }
 
@@ -1963,6 +1989,30 @@ public class MainActivity extends Activity {
         super.onResume();
         if (wasUnlocked && !unlocked()) endUnlock(false);   // timer ran out while you were away
         refreshRelayUi();                                   // back from the notification-access screen
+        long away = pausedAt == 0 ? 0 : SystemClock.elapsedRealtime() - pausedAt;
+        boolean fromPicker = SystemClock.elapsedRealtime() - resultAt < 3000 || fileCallback != null;
+        if ((refreshNow || away > 30_000) && !fromPicker) refreshChats(current);
+        refreshNow = false;
+    }
+
+    private long pausedAt, resultAt;
+    private boolean refreshNow;
+
+    /**
+     * Instagram's / Facebook's pages don't notice new messages for a while after the app has
+     * been in the background, so the chat list looked out of date. Back in the app (or tapping
+     * a notification) reloads the chat list - or the open chat, unless you've started typing.
+     */
+    private void refreshChats(Tab tab) {
+        if (tab == null || tab.kind == Kind.IG_STORIES || !tab.loaded || customView != null) return;
+        if (settingsView.getVisibility() == View.VISIBLE) return;
+        String p = tab.lastPath;
+        if (!(p.startsWith("/direct") || p.startsWith("/messages"))) return;   // e.g. watching a story
+        tab.web.evaluateJavascript("(function(){var e=document.querySelector("
+                + "'textarea,[contenteditable=true],[role=textbox]');"
+                + "return !e||!((e.value||e.innerText||'').trim());})()", r -> {
+            if ("true".equals(r)) tab.web.reload();
+        });
     }
 
     @Override
