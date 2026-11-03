@@ -52,7 +52,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * DM Only: Instagram DMs, Instagram Stories and Messenger, with the feeds blocked.
+ * The Resistance: Instagram DMs, Instagram Stories and Messenger, with the feeds blocked.
+ * (Internal names still say "dmonly" - the app's original name - so updates keep working.)
  *
  * How the blocking works:
  *  - Every page change (full loads AND Instagram's in-page URL changes) is checked.
@@ -256,7 +257,7 @@ public class MainActivity extends Activity {
                 HttpURLConnection c = (HttpURLConnection)
                         new URL("https://api.github.com/repos/" + REPO + "/releases/latest").openConnection();
                 c.setRequestProperty("Accept", "application/vnd.github+json");
-                c.setRequestProperty("User-Agent", "DMOnly-updater");
+                c.setRequestProperty("User-Agent", "TheResistance-updater");
                 c.setConnectTimeout(10_000);
                 c.setReadTimeout(10_000);
                 if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
@@ -404,7 +405,8 @@ public class MainActivity extends Activity {
         col.addView(unlockStatus);
 
         addHeader(col, "About & updates");
-        addNote(col, "DM Only version 1." + currentVersion() + ". Open source; not affiliated with Meta.");
+        addNote(col, "The Resistance, version 1." + currentVersion()
+                + ". Open source; not affiliated with Meta.");
         Button check = new Button(this);
         check.setText("Check for updates");
         check.setOnClickListener(v -> checkForUpdates(true));
