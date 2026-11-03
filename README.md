@@ -12,7 +12,7 @@ It shows the normal instagram.com and facebook.com websites and hides the parts 
 | Tab | What you get |
 |---|---|
 | **DMs** | Instagram direct messages. Posts and reels friends send you open, but swiping to the next reel sends you back. |
-| **Stories** | **Search**, **+ Post** and **+ Story** buttons, story circles, then posts from people you follow (newest first). Search people, open profiles and their posts, follow. No suggested posts, Explore grid or Reels feed. |
+| **Stories** | **Search**, **Profile**, **+ Post** and **+ Story** buttons, story circles, then posts from people you follow (newest first). Search people, open profiles (including your own) and their posts, follow. No suggested posts, Explore grid or Reels feed. |
 | **Messenger** | Facebook Messenger chats (via facebook.com/messages). |
 | **Settings** | Turn tabs on/off, notifications, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
 
