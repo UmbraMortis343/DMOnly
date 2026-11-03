@@ -93,8 +93,14 @@ public class MainActivity extends Activity {
     private static final int REQ_PERMS = 12;
     private static final int REQ_IG_PICK = 14;
 
-    /** Set on the Intent from a relayed notification: which tab to open (a Kind name). */
+    // Notifications come from a separate add-on app (Resistance Notifications), so this app
+    // never needs notification access. Tapping one opens this app with EXTRA_OPEN_TAB (a Kind
+    // name); opening a tab asks the add-on to clear that app's notifications (tags ig: / fb:).
     static final String EXTRA_OPEN_TAB = "open_tab";
+    static final String ADDON_PKG = "nz.karthik.dmonly.notifs";
+    static final String ADDON_APK = "ResistanceNotifications.apk";
+    static final String TAG_IG = "ig:";
+    static final String TAG_FB = "fb:";
 
     // Login / account / consent screens must always work.
     private static final Pattern AUTH = Pattern.compile(
@@ -147,6 +153,11 @@ public class MainActivity extends Activity {
     private TextView addonStatus;
     private Button addonButton;
     private Button addonUpdate;
+    private int latestRelease;      // newest release number seen by the update check (0 = unknown)
+
+    private boolean keyboardUp;
+    private long pausedAt, resultAt; // coming back to the app: refresh chats (see onResume)
+    private boolean refreshNow;      // opened from a notification
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
@@ -171,14 +182,13 @@ public class MainActivity extends Activity {
         column.addView(content, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        View divider = new View(this);
-        tabDivider = divider;
-        divider.setBackgroundColor(0x33888888);
-        column.addView(divider, new LinearLayout.LayoutParams(
+        tabDivider = new View(this);
+        tabDivider.setBackgroundColor(0x33888888);
+        column.addView(tabDivider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
         LinearLayout bar = new LinearLayout(this);
-        tabBar = bar;
+        tabBar = bar;   // hidden while typing or watching a story / reel
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setBackgroundColor(getColor(R.color.bar_bg));
         column.addView(bar, new LinearLayout.LayoutParams(
@@ -273,8 +283,6 @@ public class MainActivity extends Activity {
         updateTabBar();
     }
 
-    private boolean keyboardUp;
-
     /**
      * The bottom tab bar hides while you type, and while a story or reel is open: Instagram
      * sizes its story / reel viewer by screen height, and with the bar showing the viewer came
@@ -284,12 +292,10 @@ public class MainActivity extends Activity {
         if (tabBar == null || settingsView == null) return;
         boolean full = false;
         if (current != null && current.kind != Kind.MESSENGER && settingsView.getVisibility() != View.VISIBLE) {
-            String p = current.lastPath;
-            if (current == feedTab && trayTab != null && trayTab.web.getVisibility() == View.VISIBLE
-                    && trayTab.lastPath.startsWith("/stories/")) p = trayTab.lastPath;
-            boolean imm = current.immersive || (current == feedTab && trayTab != null
-                    && trayTab.web.getVisibility() == View.VISIBLE && trayTab.immersive);
-            full = imm || p.startsWith("/stories/") || p.matches("^/(?:[A-Za-z0-9._]+/)?reels?/.+");
+            boolean strip = current == feedTab && trayTab.web.getVisibility() == View.VISIBLE;
+            String p = strip && trayTab.lastPath.startsWith("/stories/") ? trayTab.lastPath : current.lastPath;
+            full = current.immersive || (strip && trayTab.immersive)
+                    || p.startsWith("/stories/") || p.matches("^/(?:[A-Za-z0-9._]+/)?reels?/.+");
         }
         int vis = keyboardUp || full ? View.GONE : View.VISIBLE;
         if (tabBar.getVisibility() != vis) {
@@ -298,7 +304,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ------------------------------------------------------------------ notification relay
+    // ------------------------------------------------------------------ notifications (add-on)
 
     @Override
     protected void onNewIntent(Intent intent) {
@@ -322,23 +328,23 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Notifications live in a separate add-on app (Resistance Notifications), so this app
-    // never needs notification access.
-    static final String ADDON_PKG = "nz.karthik.dmonly.notifs";
-    static final String ADDON_APK = "ResistanceNotifications.apk";
-    static final String TAG_IG = "ig:";
-    static final String TAG_FB = "fb:";
-    private int latestRelease;   // newest release number seen by the update check (0 = unknown)
-
-    /** Add-on version number, or -1 if it isn't installed. */
+    /** Version number of an installed app (this one or the add-on), or -1 if it isn't installed. */
     @SuppressWarnings("deprecation")
-    private int addonVersion() {
+    private int versionOf(String pkg) {
         try {
-            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(ADDON_PKG, 0);
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(pkg, 0);
             return android.os.Build.VERSION.SDK_INT >= 28 ? (int) pi.getLongVersionCode() : pi.versionCode;
         } catch (PackageManager.NameNotFoundException e) {
             return -1;
         }
+    }
+
+    private int addonVersion() {
+        return versionOf(ADDON_PKG);
+    }
+
+    private int currentVersion() {
+        return versionOf(getPackageName());
     }
 
     /** Tell the add-on to remove its notifications for the app you just opened (they've been seen). */
@@ -354,7 +360,7 @@ public class MainActivity extends Activity {
         openExternal(Uri.parse("https://github.com/" + REPO + "/releases/latest/download/" + ADDON_APK));
     }
 
-    private void refreshRelayUi() {
+    private void refreshAddonUi() {
         if (addonStatus == null) return;
         int v = addonVersion();
         if (v < 0) {
@@ -375,16 +381,6 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ updates
-
-    @SuppressWarnings("deprecation")
-    private int currentVersion() {
-        try {
-            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
-            return android.os.Build.VERSION.SDK_INT >= 28 ? (int) pi.getLongVersionCode() : pi.versionCode;
-        } catch (PackageManager.NameNotFoundException e) {
-            return 0;
-        }
-    }
 
     /** Reads the newest GitHub release; if it's newer than this app, offers to download it. */
     private void checkForUpdates(boolean manual) {
@@ -416,7 +412,7 @@ public class MainActivity extends Activity {
                 final String url = apkUrl;
                 main.post(() -> {
                     latestRelease = latest;
-                    refreshRelayUi();
+                    refreshAddonUi();
                     if (latest > currentVersion() && url != null) {
                         new AlertDialog.Builder(this)
                                 .setTitle("Update available: version 1." + latest)
@@ -474,7 +470,7 @@ public class MainActivity extends Activity {
         settingsButton.setTypeface(null, Typeface.BOLD);
         applyOrientation();
         updateUnlockUi();
-        refreshRelayUi();
+        refreshAddonUi();
         updateTabBar();
         prefs.edit().putInt("tab", -1).apply();
     }
@@ -552,10 +548,7 @@ public class MainActivity extends Activity {
             if (unlocked()) endUnlock(true);
             else startUnlock((unlockSeek.getProgress() + 1) * 5);
         });
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        blp.topMargin = dp(8);
-        col.addView(unlockButton, blp);
+        col.addView(unlockButton, blp(dp(8)));
         unlockStatus = new TextView(this);
         unlockStatus.setTextSize(14);
         unlockStatus.setTextColor(getColor(R.color.bar_fg));
@@ -1086,39 +1079,6 @@ public class MainActivity extends Activity {
         }
     };
 
-    /**
-     * A real mouse hover at page coordinates. Instagram's site opens its "Collections" picker
-     * when a mouse hovers over Save; phones have no mouse, so pretend there is one.
-     */
-    private void hoverAt(WebView w, String json) {
-        try {
-            JSONObject o = new JSONObject(json);
-            double iw = o.getDouble("iw");
-            if (iw <= 0 || w.getWidth() <= 0) return;
-            float scale = (float) (w.getWidth() / iw);
-            float x = (float) o.getDouble("x") * scale;
-            float y = (float) o.getDouble("y") * scale;
-            sendHover(w, MotionEvent.ACTION_HOVER_ENTER, x, y);
-            sendHover(w, MotionEvent.ACTION_HOVER_MOVE, x, y);
-            main.postDelayed(() -> sendHover(w, MotionEvent.ACTION_HOVER_MOVE, x + 1, y), 80);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static void sendHover(WebView w, int action, float x, float y) {
-        MotionEvent.PointerProperties[] pp = {new MotionEvent.PointerProperties()};
-        pp[0].id = 0;
-        pp[0].toolType = MotionEvent.TOOL_TYPE_MOUSE;
-        MotionEvent.PointerCoords[] pc = {new MotionEvent.PointerCoords()};
-        pc[0].x = x;
-        pc[0].y = y;
-        long t = SystemClock.uptimeMillis();
-        MotionEvent e = MotionEvent.obtain(t, t, action, 1, pp, pc, 0, 0, 1f, 1f, 0, 0,
-                InputDevice.SOURCE_MOUSE, 0);
-        w.dispatchGenericMotionEvent(e);
-        e.recycle();
-    }
-
     /** A real screen tap (so Instagram may open the photo picker), at page coordinates. */
     private void tapAt(WebView w, String json) {
         try {
@@ -1325,20 +1285,6 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** A short message from the page script. */
-        @JavascriptInterface
-        public void note(String msg) {
-            if (msg == null) return;
-            String m = msg.length() > 120 ? msg.substring(0, 120) : msg;
-            main.post(() -> Toast.makeText(MainActivity.this, m, Toast.LENGTH_SHORT).show());
-        }
-
-        /** Save -> collections: a real mouse hover over the Save button (see hoverAt). */
-        @JavascriptInterface
-        public void hover(String json) {
-            main.post(() -> hoverAt(tab.web, json));
-        }
-
         /** Swipe-to-reply: a real screen tap at page coordinates (see tapAt). */
         @JavascriptInterface
         public void tap(String json) {
@@ -1472,7 +1418,7 @@ public class MainActivity extends Activity {
         // Feed break: normal Instagram, nothing blocked until the timer runs out.
         if (ig && unlocked()) return Verdict.ALLOW;
 
-        // Your saved posts / collections (the "Save to collection" picker can open these).
+        // Your saved posts / collections.
         if (ig && path.matches("^/[^/]+/saved(/.*)?$")) return Verdict.ALLOW;
 
         // messenger.com just redirects to facebook.com/messages now.
@@ -1698,32 +1644,6 @@ public class MainActivity extends Activity {
                 + "var FBFIT=" + fbFit + ";"
                 + "var IGTAB=" + igTab + ";"
                 + "var TRAY=" + tab.isTray + ";"
-                // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
-                // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
-                // Save -> pick a collection. Instagram's site only opens its "Collections" picker
-                // when you hover over the Save button, which a phone can't do. So after you tap
-                // Save, hover it for you and the picker pops up.
-                + "if(IGTAB){(function(){var last=0;"
-                + "function saveBtn(t){if(!t||!t.closest)return null;var b=t.closest('[role=button],button');"
-                + " return b&&b.querySelector('svg[aria-label=\"Save\"]')?b:null;}"
-                + "function hasPicker(){return [].some.call(document.querySelectorAll('h1,h2,h3,h4,span,div'),function(e){"
-                + " return e.childElementCount===0&&(e.textContent||'').trim()==='Collections';});}"
-                + "function open(x,y,tries){var el=document.elementFromPoint(x,y),b=el&&el.closest?el.closest('[role=button],button'):null;"
-                + " if(!b)return;var r=b.getBoundingClientRect();"
-                + " try{DMOnly.hover(JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,iw:innerWidth}));}catch(x){}"
-                + " ['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){try{"
-                + "  var E=n.indexOf('pointer')===0?PointerEvent:MouseEvent;"
-                + "  b.dispatchEvent(new E(n,{bubbles:n!=='pointerenter'&&n!=='mouseenter',view:window,pointerType:'mouse',clientX:x,clientY:y}));}catch(z){}});"
-                + " setTimeout(function(){if(hasPicker())return;"
-                + "  if(tries<2)open(x,y,tries+1);"
-                + "  else try{DMOnly.note('Saved to All posts. (The collection list didn\\'t open.)');}catch(z){}},900);}"
-                // Catch the tap however the page handles it (some taps never become a 'click').
-                + "function onTap(e){var b=saveBtn(e.target);if(!b)return;var now=Date.now();if(now-last<800)return;last=now;"
-                + " var pt=e.changedTouches?e.changedTouches[0]:e,r=b.getBoundingClientRect();"
-                + " var x=pt&&pt.clientX!=null?pt.clientX:r.left+r.width/2,y=pt&&pt.clientY!=null?pt.clientY:r.top+r.height/2;"
-                + " setTimeout(function(){open(x,y,0);},500);}"
-                + "['touchend','pointerup','click'].forEach(function(n){document.addEventListener(n,onTap,{capture:true,passive:true});});"
-                + "})();}"
                 // Chats: swipe a message sideways to reply to it (like the Instagram app).
                 // The message slides with your finger; let go past ~60px and the page's own
                 // "Reply" button for that message is pressed for you.
@@ -1745,8 +1665,8 @@ public class MainActivity extends Activity {
                 + " if(near){var nt=near.getBoundingClientRect().top;c.sort(function(a,b){"
                 + "  return Math.abs(a.getBoundingClientRect().top-nt)-Math.abs(b.getBoundingClientRect().top-nt);});}"
                 + " var e=c[0];return e.closest('button,[role=button],a')||e;}"
-                + "function tapEl(e,cx){var b=e.getBoundingClientRect();"
-                + " var j=JSON.stringify({x:cx!=null?cx:b.left+b.width/2,y:b.top+b.height/2,iw:innerWidth});"
+                + "function tapEl(e){var b=e.getBoundingClientRect();"
+                + " var j=JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2,iw:innerWidth});"
                 + " try{DMOnly.tap(j);}catch(x){e.click();}}"
                 + "function hover(t){['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){"
                 + " try{t.dispatchEvent(new MouseEvent(n,{bubbles:true,view:window}));}catch(x){}});}"
@@ -1785,6 +1705,8 @@ public class MainActivity extends Activity {
                 + "document.addEventListener('touchend',end,{passive:true,capture:true});"
                 + "document.addEventListener('touchcancel',end,{passive:true,capture:true});"
                 + "})();}"
+                // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
+                // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
                 + "function hideNav(){"
                 + " if(!IGTAB)return;"
                 + " document.querySelectorAll('a[href=\"/explore/\"],a[href^=\"/reels\"]').forEach(function(a){"
@@ -2091,15 +2013,12 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (wasUnlocked && !unlocked()) endUnlock(false);   // timer ran out while you were away
-        refreshRelayUi();                                   // back from the notification-access screen
+        refreshAddonUi();                                   // add-on may have been installed meanwhile
         long away = pausedAt == 0 ? 0 : SystemClock.elapsedRealtime() - pausedAt;
         boolean fromPicker = SystemClock.elapsedRealtime() - resultAt < 3000 || fileCallback != null;
         if ((refreshNow || away > 30_000) && !fromPicker) refreshChats(current);
         refreshNow = false;
     }
-
-    private long pausedAt, resultAt;
-    private boolean refreshNow;
 
     /**
      * Instagram's / Facebook's pages don't notice new messages for a while after the app has
