@@ -1876,7 +1876,7 @@ public class MainActivity extends Activity {
             if (fileCallback != null) fileCallback.onReceiveValue(null);
             fileCallback = callback;
             try {
-                startActivityForResult(params.createIntent(), REQ_FILE);
+                startActivityForResult(pickerIntent(params), REQ_FILE);
             } catch (ActivityNotFoundException e) {
                 fileCallback = null;
                 return false;
@@ -1925,6 +1925,49 @@ public class MainActivity extends Activity {
         }
     };
 
+    /**
+     * The photo / file picker for a page's upload button. (Android's own createIntent() only
+     * uses the first file type the page lists - if that's an unusual one the gallery shows
+     * nothing to pick - and it can't pick several at once.)
+     */
+    private static Intent pickerIntent(WebChromeClient.FileChooserParams params) {
+        java.util.Set<String> types = new java.util.LinkedHashSet<>();
+        for (String t : params.getAcceptTypes()) {
+            t = t == null ? "" : t.trim().toLowerCase(Locale.ROOT);
+            if (t.startsWith(".")) {
+                t = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(t.substring(1));
+                if (t == null) continue;
+            }
+            if (t.isEmpty()) continue;
+            int slash = t.indexOf('/');
+            if (slash > 0 && t.matches("^(image|video|audio)/.*")) t = t.substring(0, slash) + "/*";
+            types.add(t);
+        }
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE);
+        if (types.size() == 1) {
+            i.setType(types.iterator().next());
+        } else {
+            i.setType("*/*");
+            if (!types.isEmpty()) i.putExtra(Intent.EXTRA_MIME_TYPES, types.toArray(new String[0]));
+        }
+        if (params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
+        return i;
+    }
+
+    /** What the picker returned: one file, several, or nothing (cancelled). */
+    private static Uri[] pickedFiles(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) return null;
+        android.content.ClipData clip = data.getClipData();
+        if (clip != null && clip.getItemCount() > 0) {
+            Uri[] out = new Uri[clip.getItemCount()];
+            for (int k = 0; k < out.length; k++) out[k] = clip.getItemAt(k).getUri();
+            return out;
+        }
+        return data.getData() != null ? new Uri[]{data.getData()} : null;
+    }
+
     private static String androidPermissionFor(String resource) {
         if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) return Manifest.permission.RECORD_AUDIO;
         if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) return Manifest.permission.CAMERA;
@@ -1949,7 +1992,7 @@ public class MainActivity extends Activity {
         }
         if (requestCode == REQ_FILE) {
             if (fileCallback != null) {
-                fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+                fileCallback.onReceiveValue(pickedFiles(resultCode, data));
                 fileCallback = null;
             }
             if (createMode) {                    // picked nothing -> back to the feed
