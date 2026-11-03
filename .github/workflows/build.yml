@@ -49,23 +49,23 @@ jobs:
           export DMONLY_KEYSTORE="$RUNNER_TEMP/release.keystore"
           gradle assembleRelease --no-daemon -Pvc=${{ github.run_number }}
           rm -f "$RUNNER_TEMP/release.keystore"
-          cp app/build/outputs/apk/release/app-release.apk DMOnly.apk
+          cp app/build/outputs/apk/release/app-release.apk TheResistance.apk
 
       - name: Check the APK (signed, not debuggable)
         if: steps.key.outputs.ok == 'true'
         run: |
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          "$BT/apksigner" verify --print-certs DMOnly.apk
-          if "$BT/aapt" dump xmltree DMOnly.apk AndroidManifest.xml | grep -q "debuggable.*0xffffffff"; then
+          "$BT/apksigner" verify --print-certs TheResistance.apk
+          if "$BT/aapt" dump xmltree TheResistance.apk AndroidManifest.xml | grep -q "debuggable.*0xffffffff"; then
             echo "::error::APK is debuggable"; exit 1
           fi
-          "$BT/aapt" dump badging DMOnly.apk | head -1
+          "$BT/aapt" dump badging TheResistance.apk | head -1
 
       - uses: actions/upload-artifact@v4
         if: steps.key.outputs.ok == 'true'
         with:
-          name: DMOnly-apk
-          path: DMOnly.apk
+          name: TheResistance-apk
+          path: TheResistance.apk
 
       # Every build becomes its own numbered release = public version history.
       # The app's "Check for updates" reads the newest one.
@@ -76,7 +76,7 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           git log -1 --pretty=%B > notes.txt
-          gh release create "v${{ github.run_number }}" DMOnly.apk \
-            --title "DM Only 1.${{ github.run_number }}" \
+          gh release create "v${{ github.run_number }}" TheResistance.apk \
+            --title "The Resistance 1.${{ github.run_number }}" \
             --notes-file notes.txt \
             --target "${{ github.sha }}"
