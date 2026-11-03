@@ -1086,6 +1086,39 @@ public class MainActivity extends Activity {
         }
     };
 
+    /**
+     * A real mouse hover at page coordinates. Instagram's site opens its "Collections" picker
+     * when a mouse hovers over Save; phones have no mouse, so pretend there is one.
+     */
+    private void hoverAt(WebView w, String json) {
+        try {
+            JSONObject o = new JSONObject(json);
+            double iw = o.getDouble("iw");
+            if (iw <= 0 || w.getWidth() <= 0) return;
+            float scale = (float) (w.getWidth() / iw);
+            float x = (float) o.getDouble("x") * scale;
+            float y = (float) o.getDouble("y") * scale;
+            sendHover(w, MotionEvent.ACTION_HOVER_ENTER, x, y);
+            sendHover(w, MotionEvent.ACTION_HOVER_MOVE, x, y);
+            main.postDelayed(() -> sendHover(w, MotionEvent.ACTION_HOVER_MOVE, x + 1, y), 80);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void sendHover(WebView w, int action, float x, float y) {
+        MotionEvent.PointerProperties[] pp = {new MotionEvent.PointerProperties()};
+        pp[0].id = 0;
+        pp[0].toolType = MotionEvent.TOOL_TYPE_MOUSE;
+        MotionEvent.PointerCoords[] pc = {new MotionEvent.PointerCoords()};
+        pc[0].x = x;
+        pc[0].y = y;
+        long t = SystemClock.uptimeMillis();
+        MotionEvent e = MotionEvent.obtain(t, t, action, 1, pp, pc, 0, 0, 1f, 1f, 0, 0,
+                InputDevice.SOURCE_MOUSE, 0);
+        w.dispatchGenericMotionEvent(e);
+        e.recycle();
+    }
+
     /** A real screen tap (so Instagram may open the photo picker), at page coordinates. */
     private void tapAt(WebView w, String json) {
         try {
@@ -1290,6 +1323,12 @@ public class MainActivity extends Activity {
                 tab.immersive = on;
                 updateTabBar();
             });
+        }
+
+        /** Save -> collections: a real mouse hover over the Save button (see hoverAt). */
+        @JavascriptInterface
+        public void hover(String json) {
+            main.post(() -> hoverAt(tab.web, json));
         }
 
         /** Swipe-to-reply: a real screen tap at page coordinates (see tapAt). */
@@ -1659,6 +1698,8 @@ public class MainActivity extends Activity {
                 + "if(IGTAB){document.addEventListener('click',function(e){var t=e.target;if(!t||!t.closest)return;"
                 + " var b=t.closest('[role=button],button');if(!b||!b.querySelector('svg[aria-label=\"Save\"]'))return;"
                 + " setTimeout(function(){if(!document.contains(b))return;"
+                + "  var r=b.getBoundingClientRect();"
+                + "  try{DMOnly.hover(JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,iw:innerWidth}));}catch(x){}"
                 + "  ['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){try{"
                 + "   var E=n.indexOf('pointer')===0?PointerEvent:MouseEvent;"
                 + "   b.dispatchEvent(new E(n,{bubbles:n!=='pointerenter'&&n!=='mouseenter',view:window,pointerType:'mouse'}));}catch(x){}});"
