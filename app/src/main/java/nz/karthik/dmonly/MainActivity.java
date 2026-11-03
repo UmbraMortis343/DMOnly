@@ -1325,6 +1325,14 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** A short message from the page script. */
+        @JavascriptInterface
+        public void note(String msg) {
+            if (msg == null) return;
+            String m = msg.length() > 120 ? msg.substring(0, 120) : msg;
+            main.post(() -> Toast.makeText(MainActivity.this, m, Toast.LENGTH_SHORT).show());
+        }
+
         /** Save -> collections: a real mouse hover over the Save button (see hoverAt). */
         @JavascriptInterface
         public void hover(String json) {
@@ -1695,15 +1703,27 @@ public class MainActivity extends Activity {
                 // Save -> pick a collection. Instagram's site only opens its "Collections" picker
                 // when you hover over the Save button, which a phone can't do. So after you tap
                 // Save, hover it for you and the picker pops up.
-                + "if(IGTAB){document.addEventListener('click',function(e){var t=e.target;if(!t||!t.closest)return;"
-                + " var b=t.closest('[role=button],button');if(!b||!b.querySelector('svg[aria-label=\"Save\"]'))return;"
-                + " setTimeout(function(){if(!document.contains(b))return;"
-                + "  var r=b.getBoundingClientRect();"
-                + "  try{DMOnly.hover(JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,iw:innerWidth}));}catch(x){}"
-                + "  ['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){try{"
-                + "   var E=n.indexOf('pointer')===0?PointerEvent:MouseEvent;"
-                + "   b.dispatchEvent(new E(n,{bubbles:n!=='pointerenter'&&n!=='mouseenter',view:window,pointerType:'mouse'}));}catch(x){}});"
-                + " },400);},true);}"
+                + "if(IGTAB){(function(){var last=0;"
+                + "function saveBtn(t){if(!t||!t.closest)return null;var b=t.closest('[role=button],button');"
+                + " return b&&b.querySelector('svg[aria-label=\"Save\"]')?b:null;}"
+                + "function hasPicker(){return [].some.call(document.querySelectorAll('h1,h2,h3,h4,span,div'),function(e){"
+                + " return e.childElementCount===0&&(e.textContent||'').trim()==='Collections';});}"
+                + "function open(x,y,tries){var el=document.elementFromPoint(x,y),b=el&&el.closest?el.closest('[role=button],button'):null;"
+                + " if(!b)return;var r=b.getBoundingClientRect();"
+                + " try{DMOnly.hover(JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,iw:innerWidth}));}catch(x){}"
+                + " ['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){try{"
+                + "  var E=n.indexOf('pointer')===0?PointerEvent:MouseEvent;"
+                + "  b.dispatchEvent(new E(n,{bubbles:n!=='pointerenter'&&n!=='mouseenter',view:window,pointerType:'mouse',clientX:x,clientY:y}));}catch(z){}});"
+                + " setTimeout(function(){if(hasPicker())return;"
+                + "  if(tries<2)open(x,y,tries+1);"
+                + "  else try{DMOnly.note('Saved to All posts. (The collection list didn\\'t open.)');}catch(z){}},900);}"
+                // Catch the tap however the page handles it (some taps never become a 'click').
+                + "function onTap(e){var b=saveBtn(e.target);if(!b)return;var now=Date.now();if(now-last<800)return;last=now;"
+                + " var pt=e.changedTouches?e.changedTouches[0]:e,r=b.getBoundingClientRect();"
+                + " var x=pt&&pt.clientX!=null?pt.clientX:r.left+r.width/2,y=pt&&pt.clientY!=null?pt.clientY:r.top+r.height/2;"
+                + " setTimeout(function(){open(x,y,0);},500);}"
+                + "['touchend','pointerup','click'].forEach(function(n){document.addEventListener(n,onTap,{capture:true,passive:true});});"
+                + "})();}"
                 // Chats: swipe a message sideways to reply to it (like the Instagram app).
                 // The message slides with your finger; let go past ~60px and the page's own
                 // "Reply" button for that message is pressed for you.
