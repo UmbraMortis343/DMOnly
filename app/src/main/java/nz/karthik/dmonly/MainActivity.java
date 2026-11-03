@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -768,6 +769,33 @@ public class MainActivity extends Activity {
         }
     }
 
+    private ComponentName instagramShareTarget(Intent send, boolean story) {
+        try {
+            PackageManager pm = getPackageManager();
+            ComponentName feed = null, fallback = null;
+            for (android.content.pm.ResolveInfo ri : pm.queryIntentActivities(send, 0)) {
+                if (ri.activityInfo == null) continue;
+                String name = ri.activityInfo.name.toLowerCase(Locale.ROOT);
+                CharSequence l = ri.loadLabel(pm);
+                String label = l == null ? "" : l.toString().toLowerCase(Locale.ROOT);
+                ComponentName cn = new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name);
+                boolean isStory = name.contains("story") || name.contains("stories") || label.contains("stor");
+                boolean isOther = name.contains("direct") || name.contains("clips") || name.contains("reel")
+                        || name.contains("thread") || label.contains("chat") || label.contains("direct")
+                        || label.contains("message") || label.contains("reel") || label.contains("thread");
+                if (story) {
+                    if (isStory) return cn;
+                } else if (!isStory && !isOther) {
+                    if (label.contains("feed") || label.contains("post")) feed = cn;
+                    else if (fallback == null) fallback = cn;
+                }
+            }
+            return feed != null ? feed : fallback;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void sendToInstagramApp(Uri media) {
         String type = getContentResolver().getType(media);
         if (type == null) type = "image/*";
@@ -777,6 +805,10 @@ public class MainActivity extends Activity {
                 .setPackage("com.instagram.android")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         send.setClipData(android.content.ClipData.newRawUri("", media));
+        // Instagram has a separate share target for Feed, Stories, Chats and Reels. Go straight
+        // to the right one (otherwise it can pick Stories for a post).
+        ComponentName target = instagramShareTarget(send, igPickWhat.equals("story"));
+        if (target != null) send.setComponent(target);
         try {
             startActivity(send);
             Toast.makeText(this, "In Instagram, choose " + (igPickWhat.equals("post") ? "Feed" : "Story")
