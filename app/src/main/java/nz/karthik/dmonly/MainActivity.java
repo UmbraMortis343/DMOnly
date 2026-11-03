@@ -119,6 +119,7 @@ public class MainActivity extends Activity {
     private final List<Tab> tabs = new ArrayList<>();
     private FrameLayout rootLayout;
     private FrameLayout content;
+    private View tabBar, tabDivider;   // hidden while the keyboard is up
     private Tab current;
     private SharedPreferences prefs;
     private ValueCallback<Uri[]> fileCallback;
@@ -171,11 +172,13 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         View divider = new View(this);
+        tabDivider = divider;
         divider.setBackgroundColor(0x33888888);
         column.addView(divider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
         LinearLayout bar = new LinearLayout(this);
+        tabBar = bar;
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setBackgroundColor(getColor(R.color.bar_bg));
         column.addView(bar, new LinearLayout.LayoutParams(
@@ -184,6 +187,8 @@ public class MainActivity extends Activity {
         rootLayout.addView(column, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(rootLayout);
+        // Typing: hide the tab bar so it doesn't sit on top of the keyboard.
+        rootLayout.getViewTreeObserver().addOnGlobalLayoutListener(this::onLayoutChanged);
 
         // Look like normal Chrome so Meta serves its regular mobile site.
         String def = WebSettings.getDefaultUserAgent(this);
@@ -251,6 +256,23 @@ public class MainActivity extends Activity {
         // Quietly check for a newer version at most twice a day.
         if (System.currentTimeMillis() - prefs.getLong("update_checked", 0) > 12 * 3600_000L) {
             checkForUpdates(false);
+        }
+    }
+
+    private void onLayoutChanged() {
+        boolean kb;
+        android.view.WindowInsets wi = rootLayout.getRootWindowInsets();
+        if (android.os.Build.VERSION.SDK_INT >= 30 && wi != null) {
+            kb = wi.isVisible(android.view.WindowInsets.Type.ime());
+        } else {
+            android.graphics.Rect r = new android.graphics.Rect();
+            rootLayout.getWindowVisibleDisplayFrame(r);
+            kb = rootLayout.getRootView().getHeight() - r.bottom > dp(150);
+        }
+        int vis = kb ? View.GONE : View.VISIBLE;
+        if (tabBar.getVisibility() != vis) {
+            tabBar.setVisibility(vis);
+            tabDivider.setVisibility(vis);
         }
     }
 
@@ -1235,6 +1257,12 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** Swipe-to-reply: a real screen tap at page coordinates (see tapAt). */
+        @JavascriptInterface
+        public void tap(String json) {
+            main.post(() -> tapAt(tab.web, json));
+        }
+
         /** Story strip: height (CSS px) of the story-circles row, so the strip fits it exactly. */
         @JavascriptInterface
         public void trayHeight(int cssPx) {
@@ -1589,6 +1617,60 @@ public class MainActivity extends Activity {
                 + "var TRAY=" + tab.isTray + ";"
                 // Instagram's bottom tab bar (Home / Search / Reels / Messages / Profile), on any
                 // page. Found via its Explore/Reels links so comment and reply boxes are untouched.
+                // Chats: swipe a message sideways to reply to it (like the Instagram app).
+                // The message slides with your finger; let go past ~60px and the page's own
+                // "Reply" button for that message is pressed for you.
+                + "if(IGTAB){(function(){"
+                + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false;"
+                + "function thread(){return location.pathname.indexOf('/direct/')===0;}"
+                + "function vis(e){var b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.bottom>0&&b.top<innerHeight;}"
+                + "function rowOf(e){var r=e.closest('[role=row]');if(r)return r;"
+                + " for(var n=e;n&&n!==document.body;n=n.parentElement){var b=n.getBoundingClientRect();"
+                + "  if(b.height>innerHeight*0.5)return null;"
+                + "  if(b.width>=innerWidth*0.85)return n;}return null;}"
+                + "function cands(sc){return [].slice.call(sc.querySelectorAll('[aria-label],button,[role=button],span,div')).filter(function(e){"
+                + "  var a=e.getAttribute('aria-label')||'',t=e.childElementCount===0?(e.textContent||'').trim():'';"
+                + "  return (/^reply\\b/i.test(a)||/^reply( to this message)?$/i.test(t))&&vis(e)&&!e.closest('[contenteditable=true],textarea');});}"
+                + "function findReply(sc,near,old){"
+                + " var c=cands(sc);"
+                + " if(old){var f=c.filter(function(e){return old.indexOf(e)<0;});if(f.length)c=f;}"   // prefer what the tap just opened
+                + " if(!c.length)return null;"
+                + " if(near){var nt=near.getBoundingClientRect().top;c.sort(function(a,b){"
+                + "  return Math.abs(a.getBoundingClientRect().top-nt)-Math.abs(b.getBoundingClientRect().top-nt);});}"
+                + " var e=c[0];return e.closest('button,[role=button],a')||e;}"
+                + "function tapEl(e,cx){var b=e.getBoundingClientRect();"
+                + " var j=JSON.stringify({x:cx!=null?cx:b.left+b.width/2,y:b.top+b.height/2,iw:innerWidth});"
+                + " try{DMOnly.tap(j);}catch(x){e.click();}}"
+                + "function hover(t){['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(n){"
+                + " try{t.dispatchEvent(new MouseEvent(n,{bubbles:true,view:window}));}catch(x){}});}"
+                + "function reply(r,t){"
+                + " var b=findReply(r);if(b){tapEl(b);return;}"
+                + " hover(t);"
+                + " setTimeout(function(){var b=findReply(r);if(b){tapEl(b);return;}"
+                + "  if(t.closest('a,img,video'))return;"   // tapping a photo / link would open it
+                + "  var before=cands(document);"
+                + "  tapEl(t);"                              // tap the message: its menu appears
+                + "  setTimeout(function(){var b=findReply(document,r,before);if(b)tapEl(b);},450);"
+                + " },120);}"
+                + "document.addEventListener('touchstart',function(e){row=null;"
+                + " if(!thread()||e.touches.length!==1)return;"
+                + " var t=e.target;if(!t.closest||t.closest('textarea,input,[contenteditable=true],[role=textbox]'))return;"
+                + " var r=rowOf(t);if(!r||r.querySelector('textarea,[contenteditable=true],[role=textbox]'))return;"
+                + " row=r;tgt=t;sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;on=false;dead=false;"
+                + "},{passive:true,capture:true});"
+                + "document.addEventListener('touchmove',function(e){if(!row||dead)return;"
+                + " var mx=e.touches[0].clientX-sx,my=e.touches[0].clientY-sy;"
+                + " if(!on){if(Math.abs(my)>14&&Math.abs(my)>=Math.abs(mx)){dead=true;return;}"
+                + "  if(Math.abs(mx)>14&&Math.abs(mx)>Math.abs(my)*1.5)on=true;else return;}"
+                + " dx=mx;row.style.transition='none';"
+                + " row.style.transform='translateX('+Math.max(-80,Math.min(80,dx))+'px)';"
+                + "},{passive:true,capture:true});"
+                + "function end(){if(!row)return;var r=row,t=tgt,go=on&&Math.abs(dx)>60;row=null;"
+                + " r.style.transition='transform .18s';r.style.transform='';"
+                + " if(go)setTimeout(function(){reply(r,t);},200);}"
+                + "document.addEventListener('touchend',end,{passive:true,capture:true});"
+                + "document.addEventListener('touchcancel',end,{passive:true,capture:true});"
+                + "})();}"
                 + "function hideNav(){"
                 + " if(!IGTAB)return;"
                 + " document.querySelectorAll('a[href=\"/explore/\"],a[href^=\"/reels\"]').forEach(function(a){"
