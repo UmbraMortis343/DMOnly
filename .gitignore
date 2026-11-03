@@ -9,3 +9,4 @@ upload/
 # Signing keys never go in the repo (they live in GitHub secrets)
 *.keystore
 *.jks
+notifs/build/

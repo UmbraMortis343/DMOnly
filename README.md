@@ -14,7 +14,11 @@ It shows the normal instagram.com and facebook.com websites and hides the parts 
 | **DMs** | Instagram direct messages. Posts and reels friends send you open, but swiping to the next reel sends you back. |
 | **Stories** | **Search**, **Profile**, **+ Post** and **+ Story** buttons, story circles, then posts from people you follow (newest first). Search people, open profiles (including your own) and their posts, follow. No suggested posts, Explore grid or Reels feed. |
 | **Messenger** | Facebook Messenger chats (via facebook.com/messages). |
-| **Settings** | Turn tabs on/off, notifications, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
+| **Settings** | Turn tabs on/off, the notifications add-on, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
+
+**+ Post / + Story** ask where to make it: **Here** (the website: a photo or video) or the **Instagram app**
+(music, stickers, filters). For the app, you pick a photo or video and it's handed to Instagram, which asks
+whether it's for your Story or Feed.
 
 Links to other websites open in your normal browser. Instagram tabs stay in portrait.
 
@@ -38,19 +42,25 @@ Every version and what changed is listed on the [Releases](../../releases) page.
 - Logins are stored in the app's private storage (no backups), and the APK is a signed, non-debuggable release build.
 - The signing key is kept in encrypted GitHub secrets, not in this repository.
 
-## Notifications
+## Notifications (optional add-on)
 
-Websites can't receive notifications, so keep the official Instagram and Messenger apps installed with notifications
-on (you can remove them from your home screen). Then turn on **Settings → Notifications** in The Resistance:
-their notifications are re-shown by The Resistance (sender, message, picture, and the Reply/Like buttons, which also
-work on a smartwatch), the originals are removed, and tapping one opens The Resistance instead of the official app.
+Websites can't receive notifications, so notifications come from a separate small app,
+**Resistance Notifications** (`ResistanceNotifications.apk` on the [Releases](../../releases/latest) page, or
+*Settings → Notifications → Download the add-on* in The Resistance). Keeping it separate means The Resistance
+itself never needs notification access.
 
-It needs Android's *notification access*. It only reads Instagram and Messenger notifications and ignores everything
-else. If Android calls it a "restricted setting": *Settings → Apps → The Resistance → ⋮ → Allow restricted settings*.
+Keep the official Instagram and Messenger apps installed with notifications on (you can remove them from your
+home screen). Open Resistance Notifications, turn it on and allow notification access. Their notifications are
+then re-shown (sender, message, picture, and the Reply/Like buttons, which also work on a smartwatch), the
+originals are removed, and tapping one opens The Resistance instead of the official app.
+
+It only reads Instagram and Messenger notifications and has no internet permission. If Android calls it a
+"restricted setting": *Settings → Apps → Resistance Notifications → ⋮ → Allow restricted settings*.
+Google Play Protect may warn about it because it reads notifications; that's expected for this kind of app.
 
 ## Building it yourself
 
-Pushing to `main` builds and publishes a release with GitHub Actions. To build in your own copy, add two repository
+Pushing to `main` builds both apps (`app/` and `notifs/`) and publishes a release with GitHub Actions. To build in your own copy, add two repository
 secrets: `DMONLY_KEYSTORE_B64` (a PKCS12 keystore with key alias `dmonly`, base64-encoded) and
 `DMONLY_KEYSTORE_PASSWORD`. Without them the workflow skips the build.
 
