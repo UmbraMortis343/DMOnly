@@ -4,7 +4,9 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -16,6 +18,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
+import android.service.notification.StatusBarNotification;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -87,6 +91,10 @@ public class MainActivity extends Activity {
 
     private static final int REQ_FILE = 11;
     private static final int REQ_PERMS = 12;
+    private static final int REQ_NOTIF = 13;
+
+    /** Set on the Intent from a relayed notification: which tab to open (a Kind name). */
+    static final String EXTRA_OPEN_TAB = "open_tab";
 
     // Login / account / consent screens must always work.
     private static final Pattern AUTH = Pattern.compile(
@@ -123,6 +131,7 @@ public class MainActivity extends Activity {
     private Tab feedTab;          // Stories tab: the Following feed
     private Tab trayTab;          // Stories tab: the cropped story-circles strip
     private int trayHeightPx;
+    private View storiesToolbar;  // Stories tab: Search / + Post / + Story
 
     // Settings tab + feed break (temporarily unblocks normal Instagram, max 1 hour)
     private TextView settingsButton;
@@ -133,6 +142,8 @@ public class MainActivity extends Activity {
     private TextView unlockStatus;
     private TextView unlockMinutesLabel;
     private SeekBar unlockSeek;
+    private Switch relaySwitch;
+    private TextView relayStatus;
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
@@ -193,6 +204,9 @@ public class MainActivity extends Activity {
         trayHeightPx = dp(112);
         LinearLayout storiesBox = new LinearLayout(this);
         storiesBox.setOrientation(LinearLayout.VERTICAL);
+        storiesToolbar = buildStoriesToolbar();
+        storiesBox.addView(storiesToolbar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
         storiesBox.addView(trayTab.web, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, trayHeightPx));
         storiesBox.addView(feedTab.web, new LinearLayout.LayoutParams(
@@ -229,11 +243,101 @@ public class MainActivity extends Activity {
         if (start == null || !tabEnabled(start)) start = last == -1 ? null : firstEnabledTab();
         if (start == null) showSettings();
         else select(start);
+        handleOpenIntent(getIntent());
         main.post(ticker);
 
         // Quietly check for a newer version at most twice a day.
         if (System.currentTimeMillis() - prefs.getLong("update_checked", 0) > 12 * 3600_000L) {
             checkForUpdates(false);
+        }
+    }
+
+    // ------------------------------------------------------------------ notification relay
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleOpenIntent(intent);
+    }
+
+    /** A relayed notification was tapped: open its tab. */
+    private void handleOpenIntent(Intent intent) {
+        if (intent == null) return;
+        String kind = intent.getStringExtra(EXTRA_OPEN_TAB);
+        if (kind == null) return;
+        intent.removeExtra(EXTRA_OPEN_TAB);
+        for (Tab t : tabs) {
+            if (t.kind.name().equals(kind) && tabEnabled(t)) {
+                select(t);
+                return;
+            }
+        }
+    }
+
+    private boolean hasListenerAccess() {
+        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        String me = new ComponentName(this, NotifRelayService.class).flattenToString();
+        return flat != null && flat.contains(me);
+    }
+
+    /** Remove relayed notifications for the app you just opened (they've been seen). */
+    private void clearRelayed(String tagPrefix) {
+        try {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            for (StatusBarNotification s : nm.getActiveNotifications()) {
+                if (s.getTag() != null && s.getTag().startsWith(tagPrefix)) nm.cancel(s.getTag(), s.getId());
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void setRelay(boolean on) {
+        prefs.edit().putBoolean("relay_on", on).apply();
+        if (!on) {
+            refreshRelayUi();
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+        }
+        if (!hasListenerAccess()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Allow notification access")
+                    .setMessage("On the next screen, turn on The Resistance.\n\n"
+                            + "It only looks at Instagram and Messenger notifications and ignores everything else.\n\n"
+                            + "If Android says it's a \"restricted setting\": go to Settings > Apps > "
+                            + "The Resistance, tap the ⋮ menu (top right) > Allow restricted settings, "
+                            + "then come back and try again.")
+                    .setPositiveButton("Continue", (d, w) -> openListenerSettings())
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        }
+        refreshRelayUi();
+    }
+
+    private void openListenerSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+        } catch (ActivityNotFoundException e) {
+            toast("Open Settings > Notifications > Device & app notifications.");
+        }
+    }
+
+    private void refreshRelayUi() {
+        if (relaySwitch == null) return;
+        boolean on = NotifRelayService.relayOn(prefs);
+        boolean access = hasListenerAccess();
+        relaySwitch.setOnCheckedChangeListener(null);
+        relaySwitch.setChecked(on);
+        relaySwitch.setOnCheckedChangeListener((b, c) -> setRelay(c));
+        if (!on) {
+            relayStatus.setText("Off. Notifications come from the official apps as normal.");
+        } else if (!access) {
+            relayStatus.setText("Needs notification access. Tap here to allow it.");
+        } else {
+            relayStatus.setText("On. Instagram and Messenger notifications open The Resistance.");
         }
     }
 
@@ -335,6 +439,7 @@ public class MainActivity extends Activity {
         settingsButton.setTypeface(null, Typeface.BOLD);
         applyOrientation();
         updateUnlockUi();
+        refreshRelayUi();
         prefs.edit().putInt("tab", -1).apply();
     }
 
@@ -360,6 +465,27 @@ public class MainActivity extends Activity {
         addHeader(col, "Messenger");
         addTabSwitch(col, "Messenger", tabs.get(2));
         addNote(col, "Long-press the Messenger tab to change how Facebook's site is laid out.");
+
+        addHeader(col, "Notifications");
+        relaySwitch = new Switch(this);
+        relaySwitch.setText("Show Instagram & Messenger notifications here");
+        relaySwitch.setTextSize(17);
+        relaySwitch.setTextColor(getColor(R.color.bar_active));
+        relaySwitch.setPadding(dp(16), dp(12), 0, dp(12));
+        col.addView(relaySwitch, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        relayStatus = new TextView(this);
+        relayStatus.setTextSize(14);
+        relayStatus.setTextColor(getColor(R.color.accent));
+        relayStatus.setPadding(0, dp(2), 0, dp(4));
+        relayStatus.setOnClickListener(v -> {
+            if (NotifRelayService.relayOn(prefs) && !hasListenerAccess()) setRelay(true);
+        });
+        col.addView(relayStatus);
+        addNote(col, "Websites can't get notifications, so keep the official Instagram and Messenger apps "
+                + "installed with notifications on (you can remove them from your home screen). "
+                + "With this on, their notifications are shown by The Resistance instead, with reply buttons "
+                + "that still work on your watch, and tapping one opens this app.");
 
         addHeader(col, "Feed break");
         addNote(col, "Opens normal Instagram (feed, Explore, Reels) in the Stories tab for a set time. "
@@ -545,6 +671,7 @@ public class MainActivity extends Activity {
         if (tab == feedTab && !trayTab.loaded) loadTray();
         updateStoriesLayout();
         applyOrientation();
+        clearRelayed(tab.kind == Kind.MESSENGER ? NotifRelayService.TAG_FB : NotifRelayService.TAG_IG);
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
     }
 
@@ -582,6 +709,49 @@ public class MainActivity extends Activity {
             trayTab.web.setVisibility(onFeed ? View.VISIBLE : View.GONE);
         }
         trayTab.web.setLayoutParams(lp);
+        // Search / + Post / + Story bar: on the feed page only (not during a story or feed break).
+        if (storiesToolbar != null) {
+            boolean onFeed = fp.isEmpty() || fp.equals("/");
+            storiesToolbar.setVisibility(loggedIn && !unlocked() && !storyOpen && onFeed
+                    ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private View buildStoriesToolbar() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackgroundColor(getColor(R.color.bar_bg));
+        String[] labels = {"Search", "+ Post", "+ Story"};
+        for (int i = 0; i < labels.length; i++) {
+            TextView b = new TextView(this);
+            b.setText(labels[i]);
+            b.setGravity(Gravity.CENTER);
+            b.setTextSize(14);
+            b.setTypeface(null, Typeface.BOLD);
+            b.setTextColor(getColor(R.color.bar_active));
+            final int which = i;
+            b.setOnClickListener(v -> onStoriesToolbar(which));
+            row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        }
+        return row;
+    }
+
+    private void onStoriesToolbar(int which) {
+        WebView w = feedTab.web;
+        if (which == 0) {
+            w.loadUrl("https://www.instagram.com/explore/search/");
+        } else if (which == 1) {
+            // Use Instagram's own "New post" button (hidden but still on the page);
+            // fall back to its create page if it isn't there.
+            w.evaluateJavascript("(function(){var s=document.querySelector("
+                    + "'svg[aria-label=\"New post\"],svg[aria-label=\"New Post\"],svg[aria-label=\"Create\"]');"
+                    + "var b=s&&s.closest('a,button,[role=button]');if(b){b.click();return 'ok';}return 'none';})()",
+                    r -> {
+                        if (r == null || !r.contains("ok")) w.loadUrl("https://www.instagram.com/create/select/");
+                    });
+        } else {
+            w.loadUrl("https://www.instagram.com/create/story/");
+        }
     }
 
     private int fbMode() {
@@ -853,6 +1023,24 @@ public class MainActivity extends Activity {
             return Verdict.ALLOW;
         }
 
+        // Making a post or a story
+        if (ig && path.matches("^/create(/.*)?$")) return Verdict.ALLOW;
+
+        // Searching for people (the Explore grid itself stays blocked)
+        if (ig && path.startsWith("/explore/search")) return Verdict.ALLOW;
+
+        // Someone's profile (+ their reels / tagged / followers / following lists).
+        // Reels you open from a profile still bounce back here if you swipe to the next one.
+        if (ig && isIgProfile(path)) {
+            if (tabIsIg) tab.lastSafeUrl = uri.toString();
+            clearMedia(tab);
+            return Verdict.ALLOW;
+        }
+
+        // A post (/p/...) you tapped - from a chat, a profile or "more posts". Posts don't
+        // auto-play into the next one, so they're always fine; only reels get swipe-blocked.
+        if (ig && path.matches("^/(?:[A-Za-z0-9._]+/)?p/[A-Za-z0-9_-]+.*")) return Verdict.ALLOW;
+
         // Instagram home: only in the Stories tab, where the feed is hidden and only
         // the stories row shows.
         if (ig && path.equals("/")) {
@@ -907,6 +1095,21 @@ public class MainActivity extends Activity {
                 ig ? "https://www.instagram.com/" : "https://www.facebook.com/");
         if (c == null) return false;
         return ig ? (c.contains("sessionid=") || c.contains("ds_user_id=")) : c.contains("c_user=");
+    }
+
+    // First path segments that are Instagram pages, not usernames.
+    private static final Pattern IG_RESERVED = Pattern.compile(
+            "^(explore|reels?|p|tv|stories|direct|accounts|create|about|legal|developer|web|emails|"
+                    + "challenge|session|oauth|privacy|terms|api|graphql|ajax|static|data|nametag|lite|"
+                    + "push|topics|locations|tags|audio|music|your_activity|notifications|threads|"
+                    + "qp|ar|fragment|invites|press|jobs|blog|help|download)$",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern IG_PROFILE = Pattern.compile(
+            "^/([A-Za-z0-9._]{1,30})(/(reels|tagged|followers|following|saved))?/?$");
+
+    private static boolean isIgProfile(String path) {
+        Matcher m = IG_PROFILE.matcher(path);
+        return m.matches() && !IG_RESERVED.matcher(m.group(1)).matches();
     }
 
     private static boolean isAuth(String path) {
@@ -1261,6 +1464,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (wasUnlocked && !unlocked()) endUnlock(false);   // timer ran out while you were away
+        refreshRelayUi();                                   // back from the notification-access screen
     }
 
     @Override
