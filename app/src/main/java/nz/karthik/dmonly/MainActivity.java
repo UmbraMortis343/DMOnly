@@ -1633,7 +1633,7 @@ public class MainActivity extends Activity {
                 + "  return (/^reply\\b/i.test(a)||/^reply( to this message)?$/i.test(t))&&vis(e)&&!e.closest('[contenteditable=true],textarea');});}"
                 + "function findReply(sc,near,old){"
                 + " var c=cands(sc);"
-                + " if(old){var f=c.filter(function(e){return old.indexOf(e)<0;});if(f.length)c=f;}"   // prefer what the tap just opened
+                + " if(old)c=c.filter(function(e){return old.indexOf(e)<0;});"   // only what the tap just opened
                 + " if(!c.length)return null;"
                 + " if(near){var nt=near.getBoundingClientRect().top;c.sort(function(a,b){"
                 + "  return Math.abs(a.getBoundingClientRect().top-nt)-Math.abs(b.getBoundingClientRect().top-nt);});}"
@@ -1646,12 +1646,17 @@ public class MainActivity extends Activity {
                 + "function reply(r,t){"
                 + " var b=findReply(r);if(b){tapEl(b);return;}"
                 + " hover(t);"
-                + " setTimeout(function(){var b=findReply(r);if(b){tapEl(b);return;}"
-                + "  if(t.closest('a,img,video'))return;"   // tapping a photo / link would open it
-                + "  var before=cands(document);"
-                + "  tapEl(t);"                              // tap the message: its menu appears
-                + "  setTimeout(function(){var b=findReply(document,r,before);if(b)tapEl(b);},450);"
-                + " },120);}"
+                // Then tap the message so its Reply button appears, and keep looking for it for a
+                // while (it can take a moment, or the first tap only closes the keyboard).
+                + " var before=cands(document),taps=0,tries=0;"
+                + " function look(){var b=findReply(r)||findReply(document,r,before);"
+                + "  if(b){tapEl(b);return;}"
+                + "  tries++;"
+                + "  if(tries===1||(tries===9&&taps<2)){"
+                + "   if(t.closest('a,img,video')||!document.contains(t))return;"   // tapping a photo / link would open it
+                + "   taps++;tapEl(t);}"
+                + "  if(tries<20)setTimeout(look,150);}"
+                + " setTimeout(look,120);}"
                 + "document.addEventListener('touchstart',function(e){row=null;"
                 + " if(!thread()||e.touches.length!==1)return;"
                 + " var t=e.target;if(!t.closest||t.closest('textarea,input,[contenteditable=true],[role=textbox]'))return;"
