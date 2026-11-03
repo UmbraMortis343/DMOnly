@@ -4,9 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -19,7 +17,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.service.notification.StatusBarNotification;
 import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -93,7 +90,7 @@ public class MainActivity extends Activity {
 
     private static final int REQ_FILE = 11;
     private static final int REQ_PERMS = 12;
-    private static final int REQ_NOTIF = 13;
+    private static final int REQ_IG_PICK = 14;
 
     /** Set on the Intent from a relayed notification: which tab to open (a Kind name). */
     static final String EXTRA_OPEN_TAB = "open_tab";
@@ -145,8 +142,9 @@ public class MainActivity extends Activity {
     private TextView unlockStatus;
     private TextView unlockMinutesLabel;
     private SeekBar unlockSeek;
-    private Switch relaySwitch;
-    private TextView relayStatus;
+    private TextView addonStatus;
+    private Button addonButton;
+    private Button addonUpdate;
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
@@ -278,69 +276,55 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean hasListenerAccess() {
-        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        String me = new ComponentName(this, NotifRelayService.class).flattenToString();
-        return flat != null && flat.contains(me);
+    // Notifications live in a separate add-on app (Resistance Notifications), so this app
+    // never needs notification access.
+    static final String ADDON_PKG = "nz.karthik.dmonly.notifs";
+    static final String ADDON_APK = "ResistanceNotifications.apk";
+    static final String TAG_IG = "ig:";
+    static final String TAG_FB = "fb:";
+    private int latestRelease;   // newest release number seen by the update check (0 = unknown)
+
+    /** Add-on version number, or -1 if it isn't installed. */
+    @SuppressWarnings("deprecation")
+    private int addonVersion() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(ADDON_PKG, 0);
+            return android.os.Build.VERSION.SDK_INT >= 28 ? (int) pi.getLongVersionCode() : pi.versionCode;
+        } catch (PackageManager.NameNotFoundException e) {
+            return -1;
+        }
     }
 
-    /** Remove relayed notifications for the app you just opened (they've been seen). */
+    /** Tell the add-on to remove its notifications for the app you just opened (they've been seen). */
     private void clearRelayed(String tagPrefix) {
         try {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            for (StatusBarNotification s : nm.getActiveNotifications()) {
-                if (s.getTag() != null && s.getTag().startsWith(tagPrefix)) nm.cancel(s.getTag(), s.getId());
-            }
+            if (addonVersion() < 0) return;
+            sendBroadcast(new Intent(ADDON_PKG + ".CLEAR").setPackage(ADDON_PKG).putExtra("prefix", tagPrefix));
         } catch (Exception ignored) {
         }
     }
 
-    private void setRelay(boolean on) {
-        prefs.edit().putBoolean("relay_on", on).apply();
-        if (!on) {
-            refreshRelayUi();
-            return;
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
-        }
-        if (!hasListenerAccess()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Allow notification access")
-                    .setMessage("On the next screen, turn on The Resistance.\n\n"
-                            + "It only looks at Instagram and Messenger notifications and ignores everything else.\n\n"
-                            + "If Android says it's a \"restricted setting\": go to Settings > Apps > "
-                            + "The Resistance, tap the ⋮ menu (top right) > Allow restricted settings, "
-                            + "then come back and try again.")
-                    .setPositiveButton("Continue", (d, w) -> openListenerSettings())
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        }
-        refreshRelayUi();
-    }
-
-    private void openListenerSettings() {
-        try {
-            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-        } catch (ActivityNotFoundException e) {
-            toast("Open Settings > Notifications > Device & app notifications.");
-        }
+    private void downloadAddon() {
+        openExternal(Uri.parse("https://github.com/" + REPO + "/releases/latest/download/" + ADDON_APK));
     }
 
     private void refreshRelayUi() {
-        if (relaySwitch == null) return;
-        boolean on = NotifRelayService.relayOn(prefs);
-        boolean access = hasListenerAccess();
-        relaySwitch.setOnCheckedChangeListener(null);
-        relaySwitch.setChecked(on);
-        relaySwitch.setOnCheckedChangeListener((b, c) -> setRelay(c));
-        if (!on) {
-            relayStatus.setText("Off. Notifications come from the official apps as normal.");
-        } else if (!access) {
-            relayStatus.setText("Needs notification access. Tap here to allow it.");
+        if (addonStatus == null) return;
+        int v = addonVersion();
+        if (v < 0) {
+            addonStatus.setText("Not installed.");
+            addonButton.setText("Download the add-on");
+            addonButton.setOnClickListener(x -> downloadAddon());
+            addonUpdate.setVisibility(View.GONE);
         } else {
-            relayStatus.setText("On. Instagram and Messenger notifications open The Resistance.");
+            addonStatus.setText("Installed (version 1." + v + ").");
+            addonButton.setText("Open Resistance Notifications");
+            addonButton.setOnClickListener(x -> {
+                Intent i = getPackageManager().getLaunchIntentForPackage(ADDON_PKG);
+                if (i != null) startActivity(i);
+            });
+            boolean old = v < Math.max(latestRelease, currentVersion());
+            addonUpdate.setVisibility(old ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -381,10 +365,12 @@ public class MainActivity extends Activity {
                 JSONArray assets = rel.optJSONArray("assets");
                 for (int i = 0; assets != null && i < assets.length(); i++) {
                     JSONObject a = assets.getJSONObject(i);
-                    if (a.optString("name").endsWith(".apk")) apkUrl = a.optString("browser_download_url");
+                    if (a.optString("name").equals("TheResistance.apk")) apkUrl = a.optString("browser_download_url");
                 }
                 final String url = apkUrl;
                 main.post(() -> {
+                    latestRelease = latest;
+                    refreshRelayUi();
                     if (latest > currentVersion() && url != null) {
                         new AlertDialog.Builder(this)
                                 .setTitle("Update available: version 1." + latest)
@@ -470,25 +456,21 @@ public class MainActivity extends Activity {
         addNote(col, "Long-press the Messenger tab to change how Facebook's site is laid out.");
 
         addHeader(col, "Notifications");
-        relaySwitch = new Switch(this);
-        relaySwitch.setText("Show Instagram & Messenger notifications here");
-        relaySwitch.setTextSize(17);
-        relaySwitch.setTextColor(getColor(R.color.bar_active));
-        relaySwitch.setPadding(dp(16), dp(12), 0, dp(12));
-        col.addView(relaySwitch, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        relayStatus = new TextView(this);
-        relayStatus.setTextSize(14);
-        relayStatus.setTextColor(getColor(R.color.accent));
-        relayStatus.setPadding(0, dp(2), 0, dp(4));
-        relayStatus.setOnClickListener(v -> {
-            if (NotifRelayService.relayOn(prefs) && !hasListenerAccess()) setRelay(true);
-        });
-        col.addView(relayStatus);
-        addNote(col, "Websites can't get notifications, so keep the official Instagram and Messenger apps "
-                + "installed with notifications on (you can remove them from your home screen). "
-                + "With this on, their notifications are shown by The Resistance instead, with reply buttons "
-                + "that still work on your watch, and tapping one opens this app.");
+        addNote(col, "Websites can't get notifications. The free add-on app Resistance Notifications re-shows "
+                + "Instagram and Messenger notifications (with Reply buttons that work on your watch) and opens "
+                + "this app when you tap one. Keep the official Instagram and Messenger apps installed with "
+                + "notifications on; you can remove them from your home screen.");
+        addonStatus = new TextView(this);
+        addonStatus.setTextSize(15);
+        addonStatus.setTextColor(getColor(R.color.accent));
+        addonStatus.setPadding(0, dp(8), 0, 0);
+        col.addView(addonStatus);
+        addonButton = new Button(this);
+        col.addView(addonButton, blp(dp(6)));
+        addonUpdate = new Button(this);
+        addonUpdate.setText("Update the add-on");
+        addonUpdate.setOnClickListener(v -> downloadAddon());
+        col.addView(addonUpdate, blp(dp(4)));
 
         addHeader(col, "Feed break");
         addNote(col, "Opens normal Instagram (feed, Explore, Reels) in the Stories tab for a set time. "
@@ -675,7 +657,7 @@ public class MainActivity extends Activity {
         if (tab == feedTab && !trayTab.loaded) loadTray();
         updateStoriesLayout();
         applyOrientation();
-        clearRelayed(tab.kind == Kind.MESSENGER ? NotifRelayService.TAG_FB : NotifRelayService.TAG_IG);
+        clearRelayed(tab.kind == Kind.MESSENGER ? TAG_FB : TAG_IG);
         prefs.edit().putInt("tab", tabs.indexOf(tab)).apply();
     }
 
@@ -749,12 +731,58 @@ public class MainActivity extends Activity {
             case 1:
                 openOwnProfile();
                 break;
-            case 2:
-                startCreate(CREATE_POST);
-                break;
             default:
-                startCreate(CREATE_STORY);
+                chooseCreate(which == 2 ? CREATE_POST : CREATE_STORY);
                 break;
+        }
+    }
+
+    /** Here (website: photo / video only) or the Instagram app (music, stickers, filters...). */
+    private void chooseCreate(int which) {
+        String what = which == CREATE_POST ? "post" : "story";
+        new AlertDialog.Builder(this)
+                .setTitle(which == CREATE_POST ? "New post" : "New story")
+                .setItems(new String[]{
+                        "Here (photo or video)",
+                        "Instagram app (music, stickers, filters)"}, (d, i) -> {
+                    if (i == 0) startCreate(which);
+                    else pickForInstagramApp(what);
+                })
+                .show();
+    }
+
+    // Instagram app: pick a photo / video here, then hand it to Instagram, which asks where to
+    // share it (Story, Feed, Reels...). That opens straight in its editor, not its feed.
+    private String igPickWhat = "story";
+
+    private void pickForInstagramApp(String what) {
+        igPickWhat = what;
+        Intent pick = new Intent(Intent.ACTION_GET_CONTENT)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"})
+                .addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(pick, REQ_IG_PICK);
+        } catch (ActivityNotFoundException e) {
+            toast("No photo picker found.");
+        }
+    }
+
+    private void sendToInstagramApp(Uri media) {
+        String type = getContentResolver().getType(media);
+        if (type == null) type = "image/*";
+        Intent send = new Intent(Intent.ACTION_SEND)
+                .setType(type)
+                .putExtra(Intent.EXTRA_STREAM, media)
+                .setPackage("com.instagram.android")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        send.setClipData(android.content.ClipData.newRawUri("", media));
+        try {
+            startActivity(send);
+            Toast.makeText(this, "In Instagram, choose " + (igPickWhat.equals("post") ? "Feed" : "Story")
+                    + ". Come back here when you're done.", Toast.LENGTH_LONG).show();
+        } catch (ActivityNotFoundException e) {
+            toast("The Instagram app isn't installed. Use \"Here\" instead.");
         }
     }
 
@@ -1744,6 +1772,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_IG_PICK) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) sendToInstagramApp(data.getData());
+            return;
+        }
         if (requestCode == REQ_FILE) {
             if (fileCallback != null) {
                 fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
