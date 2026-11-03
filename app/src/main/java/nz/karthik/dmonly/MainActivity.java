@@ -287,7 +287,9 @@ public class MainActivity extends Activity {
             String p = current.lastPath;
             if (current == feedTab && trayTab != null && trayTab.web.getVisibility() == View.VISIBLE
                     && trayTab.lastPath.startsWith("/stories/")) p = trayTab.lastPath;
-            full = p.startsWith("/stories/") || p.matches("^/(?:[A-Za-z0-9._]+/)?reels?/.+");
+            boolean imm = current.immersive || (current == feedTab && trayTab != null
+                    && trayTab.web.getVisibility() == View.VISIBLE && trayTab.immersive);
+            full = imm || p.startsWith("/stories/") || p.matches("^/(?:[A-Za-z0-9._]+/)?reels?/.+");
         }
         int vis = keyboardUp || full ? View.GONE : View.VISIBLE;
         if (tabBar.getVisibility() != vis) {
@@ -1185,6 +1187,7 @@ public class MainActivity extends Activity {
         String mediaKey;        // the one reel/post you're allowed to be watching
         boolean mediaFromShare; // share links redirect once to the real reel URL
         boolean swipeBounce;    // the pending bounce is a reel swipe
+        boolean immersive;      // a story / reel is filling the screen (tab bar hides)
         String lastSeenUrl;
         String lastPath = "";
         int bounceCount;
@@ -1277,6 +1280,15 @@ public class MainActivity extends Activity {
                 createBusy = busy;
                 if (busy) createSawBusy = true;
                 else scheduleCreateCheck();          // shared, or cancelled
+            });
+        }
+
+        /** A story / reel viewer opened (true) or closed (false). */
+        @JavascriptInterface
+        public void immersive(boolean on) {
+            main.post(() -> {
+                tab.immersive = on;
+                updateTabBar();
             });
         }
 
@@ -1769,7 +1781,7 @@ public class MainActivity extends Activity {
                 + "}"
                 // Story strip: keep only the row of story circles (rings are <canvas>, links go
                 // to /stories/), hide everything around it, and tell the app how tall it is.
-                + "var trayH=0;"
+                + "var trayH=0,lastImm=false;"
                 // Feed (below the strip): if Instagram shows its own story row there too, hide it.
                 + "function feedNoTray(){"
                 + " if(!STORIES||TRAY||location.pathname!=='/')return;"
@@ -1812,6 +1824,12 @@ public class MainActivity extends Activity {
                 + " try{trayOnly();}catch(e){}"
                 + " try{hideNav();}catch(e){}"
                 + " try{fbList();}catch(e){}"
+                // Story / reel viewer showing (even when the address doesn't change): tell the app,
+                // which hides its tab bar so Instagram can use the whole screen.
+                + " if(IGTAB){var pp=location.pathname,imm=/^\\/stories\\//.test(pp)||/^\\/(?:[\\w.]+\\/)?reels?\\/./.test(pp)"
+                + "  ||[].some.call(document.querySelectorAll('video'),function(v){var b=v.getBoundingClientRect();"
+                + "   return !v.closest('article')&&b.height>innerHeight*0.6&&b.height>b.width*1.4&&b.width>innerWidth*0.6&&b.top<innerHeight*0.4;});"
+                + "  if(imm!==lastImm){lastImm=imm;try{DMOnly.immersive(imm);}catch(e){}}}"
                 + "}"
                 + "var last='';"
                 + "setInterval(function(){ensure();"
