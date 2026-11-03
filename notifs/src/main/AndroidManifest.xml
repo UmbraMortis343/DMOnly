@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Resistance Notifications: an optional add-on for The Resistance.
+  It is a separate app so the main app never needs notification access.
+  No internet permission: it can't send anything anywhere.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- So tapping a notification can open The Resistance -->
+    <queries>
+        <package android:name="nz.karthik.dmonly" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".NotifRelayService"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- The Resistance asks this to clear its notifications when you open that tab.
+             It can only remove this add-on's own notifications. -->
+        <receiver
+            android:name=".ClearReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="nz.karthik.dmonly.notifs.CLEAR" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
