@@ -5,3 +5,7 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+upload/
+# Signing keys never go in the repo (they live in GitHub secrets)
+*.keystore
+*.jks

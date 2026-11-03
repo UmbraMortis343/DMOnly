@@ -1,34 +1,50 @@
 # DM Only
 
-Instagram DMs, Instagram Stories and Messenger — with the feeds blocked.
+An Android app for Instagram DMs and Messenger without the feeds.
+Open source. **Not affiliated with, endorsed by, or connected to Meta, Instagram or Facebook.**
+It shows the normal instagram.com and facebook.com websites and hides the parts that are built to keep you scrolling.
 
-**Tabs:** DMs · Stories · Messenger
+## What it does
 
-- Reels/posts/videos friends send you open normally. Swipe to the next one and you're sent back to the chat.
-- Stories tab shows the stories row only (the feed under it is hidden).
-- Home feed, Explore, Reels tab, profiles, Watch and Marketplace are blocked.
-- Links to other websites open in your normal browser.
-- Tap the tab you're on to jump back to the inbox. Long-press a tab for Reload / Back to start (and, on Messenger, a desktop-site switch if the mobile site won't load).
+| Tab | What you get |
+|---|---|
+| **DMs** | Instagram direct messages. Reels/posts friends send you play, but swiping to the next one sends you back to the chat. |
+| **Stories** | Story circles at the top, posts from people you follow (newest first) below. No suggested posts, Explore or Reels. |
+| **Messenger** | Facebook Messenger chats (via facebook.com/messages). |
+| **Settings** | Turn tabs on/off, take a timed **feed break** (5–60 min of normal Instagram), check for updates. |
 
-## Build it — option A: GitHub (no installs)
+Links to other websites open in your normal browser. Instagram tabs stay in portrait.
 
-1. On a computer, go to github.com → **New repository** → name it `DMOnly` → **Private** → Create.
-2. On the empty repo page click **uploading an existing file**, then drag in **everything inside** this folder. Commit.
-   - The `.github` folder is hidden. If it didn't upload (check for a `.github` folder in the repo), click **Add file → Create new file**, type `.github/workflows/build.yml` as the name, paste in that file's contents, and commit.
-3. Open the **Actions** tab and wait ~4 minutes for the green tick.
-4. On your phone, open the repo → **Releases** → **latest** → tap `DMOnly.apk`.
-5. Android will ask to allow installs from your browser — allow it, then install.
+## Install (Android 8+)
 
-Every time you change a file and commit, a fresh APK appears under Releases. It installs over the old one without logging you out.
+1. On your phone, open **[Releases](../../releases/latest)** and tap **DMOnly.apk**.
+2. Allow your browser to install apps when asked, then tap **Install**.
+3. Turn that permission back off afterwards: *Settings → Apps → Special app access → Install unknown apps → your browser → Off*.
+4. Open DM Only and log in to Instagram and Facebook as normal.
 
-## Build it — option B: Android Studio
+## Updates
 
-1. Install Android Studio, then **File → Open** this folder.
-2. Let it sync (it may offer to add a Gradle wrapper — say yes).
-3. Plug in your phone with USB debugging on and press **Run ▶**.
+The app checks for a new version about twice a day (or tap **Settings → Check for updates**).
+When there is one, tap **Download**, open the file, and install. Updates install over the old version and you stay logged in.
+Every version and what changed is listed on the [Releases](../../releases) page.
 
-## Notes
+## Privacy & security
 
-- **No notifications.** Websites inside an app can't push notifications. Keep the official apps installed with notifications on (or check this app regularly).
-- Instagram changes its site often. If something slips through or gets wrongly blocked, the rules are all in `evaluate()` and `injectHelpers()` in `MainActivity.java`.
-- The signing key (`app/sideload.keystore`, password `android`) is just for sideloading so updates install cleanly. Don't use it for anything else.
+- Your logins go straight to Instagram/Facebook over HTTPS. There is no other server, analytics or tracking.
+- The app never reads what you type or your messages. Its only page script hides buttons and tells the app which page you're on.
+- Logins are stored in the app's private storage (no backups), and the APK is a signed, non-debuggable release build.
+- The signing key is kept in encrypted GitHub secrets, not in this repository.
+
+## Notifications
+
+Websites inside an app can't receive notifications. Keep the official Instagram/Messenger apps installed with
+notifications on if you need them (e.g. on a smartwatch).
+
+## Building it yourself
+
+Pushing to `main` builds and publishes a release with GitHub Actions. To build in your own copy, add two repository
+secrets: `DMONLY_KEYSTORE_B64` (a PKCS12 keystore with key alias `dmonly`, base64-encoded) and
+`DMONLY_KEYSTORE_PASSWORD`. Without them the workflow skips the build.
+
+The blocking rules live in `evaluate()` and `injectHelpers()` in `MainActivity.java`.
+Instagram and Facebook change their sites often, so things may need adjusting.
