@@ -1657,8 +1657,9 @@ public class MainActivity extends Activity {
                 + "var FBFIT=" + fbFit + ";"
                 + "var IGTAB=" + igTab + ";"
                 + "var TRAY=" + tab.isTray + ";"
-                // Chats: swipe a message right to reply to it, or left to react with a heart. It
-                // slides with your finger; let go past ~60px. Both press the page's own (hidden)
+                // Chats: swipe a message towards the middle of the screen to reply to it, or towards
+                // the edge to react with a heart (their messages: right = reply; yours: left = reply).
+                // It slides with your finger; let go past ~60px. Both press the page's own (hidden)
                 // Reply / React buttons for that message.
                 + "if(IGTAB){(function(){"
                 + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false;"
@@ -1721,7 +1722,8 @@ public class MainActivity extends Activity {
                 + "},{passive:true,capture:true});"
                 + "function end(){if(!row)return;var r=row,t=tgt,d=dx,go=on&&Math.abs(d)>60;row=null;"
                 + " r.style.transition='transform .18s';r.style.transform='';"
-                + " if(go)setTimeout(function(){if(d>0)reply(r,t);else heart(r,t);},200);}"
+                + " var b=t.getBoundingClientRect(),mine=b.left+b.width/2>innerWidth/2;"   // your messages sit on the right
+                + " if(go)setTimeout(function(){if((d>0)!==mine)reply(r,t);else heart(r,t);},200);}"
                 + "document.addEventListener('touchend',end,{passive:true,capture:true});"
                 + "document.addEventListener('touchcancel',end,{passive:true,capture:true});"
                 + "})();}"
