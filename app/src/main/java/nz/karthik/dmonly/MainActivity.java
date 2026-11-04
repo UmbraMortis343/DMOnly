@@ -41,7 +41,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -387,33 +386,25 @@ public class MainActivity extends Activity {
         prefs.edit().putLong("update_checked", System.currentTimeMillis()).apply();
         new Thread(() -> {
             try {
-                HttpURLConnection c = (HttpURLConnection)
-                        new URL("https://api.github.com/repos/" + REPO + "/releases/latest").openConnection();
-                c.setRequestProperty("Accept", "application/vnd.github+json");
-                c.setRequestProperty("User-Agent", "TheResistance-updater");
-                c.setConnectTimeout(10_000);
-                c.setReadTimeout(10_000);
-                if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                try (InputStream in = c.getInputStream()) {
-                    byte[] buf = new byte[8192];
-                    int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                int found;
+                String text = "", apk = RELEASES_PAGE + "/latest/download/TheResistance.apk";
+                try {
+                    JSONObject rel = new JSONObject(httpGet(
+                            "https://api.github.com/repos/" + REPO + "/releases/latest"));
+                    found = Integer.parseInt(rel.getString("tag_name").replaceAll("[^0-9]", ""));
+                    text = rel.optString("body", "").trim();
+                } catch (Exception apiFailed) {
+                    // GitHub's API only allows 60 checks an hour per internet address, which a VPN
+                    // shares with lots of people. The normal releases page has no such limit: it
+                    // redirects to .../releases/tag/v<number>.
+                    found = latestFromReleasesPage();
                 }
-                JSONObject rel = new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
-                int latest = Integer.parseInt(rel.getString("tag_name").replaceAll("[^0-9]", ""));
-                String notes = rel.optString("body", "").trim();
-                String apkUrl = null;
-                JSONArray assets = rel.optJSONArray("assets");
-                for (int i = 0; assets != null && i < assets.length(); i++) {
-                    JSONObject a = assets.getJSONObject(i);
-                    if (a.optString("name").equals("TheResistance.apk")) apkUrl = a.optString("browser_download_url");
-                }
-                final String url = apkUrl;
+                final int latest = found;
+                final String notes = text, url = apk;
                 main.post(() -> {
                     latestRelease = latest;
                     refreshAddonUi();
-                    if (latest > currentVersion() && url != null) {
+                    if (latest > currentVersion()) {
                         new AlertDialog.Builder(this)
                                 .setTitle("Update available: version 1." + latest)
                                 .setMessage((notes.isEmpty() ? "" : notes + "\n\n")
@@ -435,6 +426,34 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    private static String httpGet(String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setRequestProperty("Accept", "application/vnd.github+json");
+        c.setRequestProperty("User-Agent", "TheResistance-updater");
+        c.setConnectTimeout(10_000);
+        c.setReadTimeout(10_000);
+        if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (InputStream in = c.getInputStream()) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        return out.toString(StandardCharsets.UTF_8.name());
+    }
+
+    private static int latestFromReleasesPage() throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(RELEASES_PAGE + "/latest").openConnection();
+        c.setInstanceFollowRedirects(false);
+        c.setRequestProperty("User-Agent", "TheResistance-updater");
+        c.setConnectTimeout(10_000);
+        c.setReadTimeout(10_000);
+        c.getResponseCode();
+        Matcher m = Pattern.compile("/tag/v(\\d+)").matcher(String.valueOf(c.getHeaderField("Location")));
+        if (!m.find()) throw new Exception("no release");
+        return Integer.parseInt(m.group(1));
     }
 
     // ------------------------------------------------------------------ settings tab
