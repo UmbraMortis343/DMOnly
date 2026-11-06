@@ -1681,7 +1681,7 @@ public class MainActivity extends Activity {
                 // It slides with your finger; let go past ~60px. Both press the page's own (hidden)
                 // Reply / React buttons for that message.
                 + "if(IGTAB){(function(){"
-                + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false;"
+                + "var sx=0,sy=0,row=null,tgt=null,dx=0,on=false,dead=false,mine=false;"
                 + "function thread(){return location.pathname.indexOf('/direct/t/')===0;}"
                 + "function vis(e){var b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.bottom>0&&b.top<innerHeight;}"
                 + "function rowOf(e){var r=e.closest('[role=row]');if(r)return r;"
@@ -1731,6 +1731,8 @@ public class MainActivity extends Activity {
                 + " var t=e.target;if(!t.closest||t.closest('textarea,input,[contenteditable=true],[role=textbox]'))return;"
                 + " var r=rowOf(t);if(!r||r.querySelector('textarea,[contenteditable=true],[role=textbox]'))return;"
                 + " row=r;tgt=t;sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;on=false;dead=false;"
+                // Whose message: yours sit against the right edge. Measured now, before it slides.
+                + " var b=t.getBoundingClientRect();mine=b.left>innerWidth-b.right;"
                 + "},{passive:true,capture:true});"
                 + "document.addEventListener('touchmove',function(e){if(!row||dead)return;"
                 + " var mx=e.touches[0].clientX-sx,my=e.touches[0].clientY-sy;"
@@ -1739,10 +1741,9 @@ public class MainActivity extends Activity {
                 + " dx=mx;row.style.transition='none';"
                 + " row.style.transform='translateX('+Math.max(-80,Math.min(80,dx))+'px)';"
                 + "},{passive:true,capture:true});"
-                + "function end(){if(!row)return;var r=row,t=tgt,d=dx,go=on&&Math.abs(d)>60;row=null;"
+                + "function end(){if(!row)return;var r=row,t=tgt,d=dx,m=mine,go=on&&Math.abs(d)>60;row=null;"
                 + " r.style.transition='transform .18s';r.style.transform='';"
-                + " var b=t.getBoundingClientRect(),mine=b.left+b.width/2>innerWidth/2;"   // your messages sit on the right
-                + " if(go)setTimeout(function(){if((d>0)!==mine)reply(r,t);else heart(r,t);},200);}"
+                + " if(go)setTimeout(function(){if((d>0)!==m)reply(r,t);else heart(r,t);},200);}"
                 + "document.addEventListener('touchend',end,{passive:true,capture:true});"
                 + "document.addEventListener('touchcancel',end,{passive:true,capture:true});"
                 + "})();}"
